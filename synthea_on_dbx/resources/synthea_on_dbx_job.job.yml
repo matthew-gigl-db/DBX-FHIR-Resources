@@ -18,4 +18,4 @@ resources:
       tasks:
         - task_key: refresh_pipeline
           pipeline_task:
-            pipeline_id: ${resources.pipelines.synthea_on_dbx_etl.id}
+            pipeline_id: ${resources.pipelines.synthea_on_dbx_data_gen_etl.id}
