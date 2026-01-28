@@ -35,12 +35,21 @@ resources:
             notebook_path: ../src/0.0-set-up-check.py
           environment_key: primary
 
+        - task_key: synthea_installed
+          depends_on:
+            - task_key: set_up_check
+          condition_task:
+            op: EQUAL_TO
+            left: "{{tasks.set_up_check.values.result}}"
+            right: "True"
+          
         - task_key: uc_setup
           notebook_task: 
             notebook_path: ../src/0.1-uc-setup.py
           environment_key: primary
           depends_on:
-            - task_key: set_up_check
+            - task_key: synthea_installed
+              outcome: "false"
           
         - task_key: install_synthea
           notebook_task: 
