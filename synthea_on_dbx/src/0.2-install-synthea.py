@@ -40,14 +40,14 @@
 # COMMAND ----------
 
 # DBTITLE 1,set db widgets
-dbutils.widgets.text(name = "catalog_name", defaultValue="", label="Catalog Name")
-dbutils.widgets.text(name = "schema_name", defaultValue="synthea", label="Schema Name")
+dbutils.widgets.text(name = "catalog_use", defaultValue="", label="Catalog Name")
+dbutils.widgets.text(name = "schema_use", defaultValue="synthea", label="Schema Name")
 
 # COMMAND ----------
 
 # DBTITLE 1,retrieve widget values
-catalog_name = dbutils.widgets.get(name = "catalog_name")
-schema_name = dbutils.widgets.get(name = "schema_name")
+catalog_name = dbutils.widgets.get(name = "catalog_use")
+schema_name = dbutils.widgets.get(name = "schema_use")
 volume_path = f"/Volumes/{catalog_name}/{schema_name}/synthetic_files_raw/"
 print(f"""
   catalog_name = {catalog_name}

@@ -25,9 +25,9 @@ resources:
         - name: catalog_use
           default: ${var.catalog}
         - name: schema_use 
-          default: ${resources.schemas.ames_housing_schema.name}
+          default: ${resources.schemas.data_gen_schema.name}
         - name: volume_path_use
-          default: ${resources.volumes.ames_housing_landing_volume.volume_path}
+          default: ${resources.volumes.synthetic_files_raw.volume_path}
 
       tasks:
         - task_key: set_up_check

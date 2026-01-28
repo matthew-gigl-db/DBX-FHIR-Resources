@@ -21,8 +21,8 @@
 # COMMAND ----------
 
 # DBTITLE 1,widget assignment
-dbutils.widgets.text(name = "catalog_name", defaultValue="", label="Catalog Name")
-dbutils.widgets.text(name = "schema_name", defaultValue="synthea", label="Schema Name")
+dbutils.widgets.text(name = "catalog_use", defaultValue="", label="Catalog Name")
+dbutils.widgets.text(name = "schema_use", defaultValue="synthea", label="Schema Name")
 
 # COMMAND ----------
 
@@ -32,7 +32,7 @@ dbutils.widgets.text(name = "schema_name", defaultValue="synthea", label="Schema
 # COMMAND ----------
 
 # DBTITLE 1,retrieve catalog name
-catalog_name = dbutils.widgets.get(name = "catalog_name")
+catalog_name = dbutils.widgets.get(name = "catalog_use")
 catalog_name
 
 # COMMAND ----------
@@ -40,7 +40,7 @@ catalog_name
 # DBTITLE 1,create catalog
 # MAGIC %sql
 # MAGIC DECLARE OR REPLACE VARIABLE catalog_name STRING; 
-# MAGIC SET VARIABLE catalog_name = :catalog_name;  
+# MAGIC SET VARIABLE catalog_name = :catalog_use;  
 # MAGIC -- create catalog if not exists identifier(catalog_name);
 # MAGIC -- catalog must be created prior asset bundle deployment in new version.  
 
@@ -59,7 +59,7 @@ catalog_name
 # COMMAND ----------
 
 # DBTITLE 1,retrieve schema name
-schema_name = dbutils.widgets.get("schema_name")
+schema_name = dbutils.widgets.get("schema_use")
 schema_name
 
 # COMMAND ----------
@@ -67,7 +67,7 @@ schema_name
 # DBTITLE 1,create schema in catalog
 # MAGIC %sql
 # MAGIC DECLARE OR REPLACE VARIABLE schema_name STRING; 
-# MAGIC SET VARIABLE schema_name = :schema_name; 
+# MAGIC SET VARIABLE schema_name = :schema_use; 
 # MAGIC -- create schema if not exists identifier(catalog_name || "." || schema_name);
 # MAGIC -- schema is managed by the asset bundle itself. 
 
