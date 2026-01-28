@@ -41,7 +41,8 @@ catalog_name
 # MAGIC %sql
 # MAGIC DECLARE OR REPLACE VARIABLE catalog_name STRING; 
 # MAGIC SET VARIABLE catalog_name = :catalog_name;  
-# MAGIC create catalog if not exists identifier(catalog_name);
+# MAGIC -- create catalog if not exists identifier(catalog_name);
+# MAGIC -- catalog must be created prior asset bundle deployment in new version.  
 
 # COMMAND ----------
 
@@ -67,7 +68,8 @@ schema_name
 # MAGIC %sql
 # MAGIC DECLARE OR REPLACE VARIABLE schema_name STRING; 
 # MAGIC SET VARIABLE schema_name = :schema_name; 
-# MAGIC create schema if not exists identifier(catalog_name || "." || schema_name);
+# MAGIC -- create schema if not exists identifier(catalog_name || "." || schema_name);
+# MAGIC -- schema is managed by the asset bundle itself. 
 
 # COMMAND ----------
 
@@ -84,8 +86,10 @@ schema_name
 # COMMAND ----------
 
 # DBTITLE 1,create volume
+# MAGIC %skip
 # MAGIC %sql
 # MAGIC create volume if not exists synthetic_files_raw;
+# MAGIC -- volume created using the asset bundle's volume resource definition
 
 # COMMAND ----------
 
@@ -94,6 +98,9 @@ schema_name
 
 # COMMAND ----------
 
-# DBTITLE 1,check volume
-command = f"ls -R /Volumes/{catalog_name}/{schema_name}/synthetic_files_raw/"
-!{command}
+# DBTITLE 1,check volume exists
+result = %sx ls /Volumes/{catalog_name}/{schema_name}/synthetic_files_raw/
+
+# COMMAND ----------
+
+print(result)

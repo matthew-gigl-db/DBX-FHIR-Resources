@@ -82,13 +82,5 @@ urlretrieve(
 
 # COMMAND ----------
 
-# DBTITLE 1,check installation
-command = f"""
-cd {volume_path}
-java -jar synthea-with-dependencies.jar
-"""
-
-# COMMAND ----------
-
-# DBTITLE 1,run command
-!{command}
+# DBTITLE 1,Check installation
+# MAGIC %sx cd {volume_path}; java -jar synthea-with-dependencies.jar;

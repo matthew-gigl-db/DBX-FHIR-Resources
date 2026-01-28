@@ -17,9 +17,6 @@ variables:
   volume:
     description: The primary volume to use for landing new data files to be ingested by the Lafeflow Declaritive Pipelines. 
     default: landing
-  serverless_environment_version: 
-    default: "4"
-    description: The Serverless Environment version to use with serverless workflows.  
   # ml_model_name: 
   #   description: The name of the machine learning model in the Unity Catalog model registry.  
   # model_storage_location_volume:
@@ -29,10 +26,10 @@ variables:
     description: The email addresses to use for failure notifications
   run_as_user:
     description: The user that the workflows or other assets should run as, may typcially have ownership over the assets.  
-  run_as_user_permissions:
-    description: Permission grants to be given to the run_as_user of the target workspace. 
-  user_permissions: 
-    description: Permission grants to be given to the users group of the target workspace.  
+  # run_as_user_permissions:
+  #   description: Permission grants to be given to the run_as_user of the target workspace. 
+  # user_permissions: 
+  #   description: Permission grants to be given to the users group of the target workspace.  
   serverless_environment_version: 
     default: "4"
     description: The Serverless Environment version to use with serverless workflows.  
@@ -89,8 +86,8 @@ targets:
       schema: synthea_data_gen
       notifications: []
       run_as_user: matthew.giglia@databricks.com
-      run_as_user_permissions: ["CAN_MANAGE", "CAN_RUN", "CAN_MANAGE_RUN"]
-      user_permissions: ["CAN_READ", "CAN_VIEW"]
+      # run_as_user_permissions: ["CAN_MANAGE", "CAN_RUN", "CAN_MANAGE_RUN"]
+      # user_permissions: ["CAN_READ", "CAN_VIEW"]
 
   
   prod:
