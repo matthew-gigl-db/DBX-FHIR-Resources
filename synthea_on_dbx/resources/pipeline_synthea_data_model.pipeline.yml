@@ -22,7 +22,6 @@ resources:
       channel: PREVIEW
       catalog: ${var.catalog}
       serverless: true
-      data_sampling: false
       event_log:
         name: event_log_pipeline_bronze_and_silver_synthea_csv
         schema: ${resources.schemas.data_gen_schema.name}
