@@ -28,6 +28,14 @@ resources:
           default: ${resources.schemas.data_gen_schema.name}
         - name: volume_path_use
           default: ${resources.volumes.synthetic_files_raw.volume_path}
+        - name: min_records
+          default: 1
+        - name: max_records
+          default: 1000
+        - name: inject_bad_data
+          default: "true"
+        - name: move_csv_to_landing
+          default: "true"
 
       tasks:
         - task_key: set_up_check
