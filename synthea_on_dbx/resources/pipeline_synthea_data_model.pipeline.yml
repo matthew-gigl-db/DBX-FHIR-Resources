@@ -25,6 +25,6 @@ resources:
       data_sampling: false
       event_log:
         name: event_log_pipeline_bronze_and_silver_synthea_csv
-        schema: ${var.pipeline_schema_use}
-        catalog: ${var.pipeline_catalog_use}
+        schema: ${resources.schemas.data_gen_schema.name}
+        catalog: ${var.catalog}
       root_path: ../pipelines
