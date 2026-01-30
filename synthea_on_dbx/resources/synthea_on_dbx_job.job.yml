@@ -10,12 +10,117 @@ resources:
         periodic:
           interval: 1
           unit: DAYS
+      
+      environments:
+        - environment_key: primary
+          spec:
+            environment_version: ${var.serverless_environment_version}
+            dependencies: []
 
       #email_notifications:
       #  on_failure:
       #    - your_email@example.com
+      
+      parameters:
+        - name: catalog_use
+          default: ${var.catalog}
+        - name: schema_use 
+          default: ${resources.schemas.data_gen_schema.name}
+        - name: volume_path_use
+          default: ${resources.volumes.synthetic_files_raw.volume_path}
+        - name: min_records
+          default: 1
+        - name: max_records
+          default: 1000
+        - name: inject_bad_data
+          default: "true"
+        - name: move_csv_to_landing
+          default: "true"
 
       tasks:
-        - task_key: refresh_pipeline
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.synthea_on_dbx_data_gen_etl.id}
+        - task_key: set_up_check
+          notebook_task: 
+            notebook_path: ../src/0.0-set-up-check.py
+          environment_key: primary
+
+        - task_key: synthea_installed
+          depends_on:
+            - task_key: set_up_check
+          condition_task:
+            op: EQUAL_TO
+            left: "{{tasks.set_up_check.values.result}}"
+            right: "True"
+          
+        - task_key: uc_setup
+          notebook_task: 
+            notebook_path: ../src/0.1-uc-setup.py
+          environment_key: primary
+          depends_on:
+            - task_key: synthea_installed
+              outcome: "false"
+          
+        - task_key: install_synthea
+          notebook_task: 
+            notebook_path: ../src/0.2-install-synthea.py
+          environment_key: primary
+          depends_on:
+            - task_key: uc_setup
+              
+        - task_key: set_configuration
+          notebook_task: 
+            notebook_path: ../src/0.3-synthea-configuration.py
+          environment_key: primary
+          depends_on:
+            - task_key: install_synthea
+
+        - task_key: generate_bundles
+          depends_on:
+            - task_key: synthea_installed
+              outcome: "true"
+            - task_key: set_configuration
+          run_if: AT_LEAST_ONE_SUCCESS
+          notebook_task:
+            notebook_path: ../src/1.0-synthea-data-generator.py
+        
+        # - task_key: inject_bad_date
+        #   depends_on:
+        #     - task_key: generate_bundles
+        #   condition_task:
+        #     op: EQUAL_TO
+        #     left: "{{job.parameters.inject_bad_data}}"
+        #     right: "true"
+
+        # - task_key: bad_data_injector
+        #   depends_on:
+        #     - task_key: inject_bad_date
+        #       outcome: "true"
+        #   notebook_task:
+        #     notebook_path: ../src/2.0-inject-bad-data.py
+
+        # - task_key: move_csv_to_landing
+        #   depends_on:
+        #     - task_key: bad_data_injector
+        #     - task_key: inject_bad_date
+        #       outcome: "false"
+        #   run_if: AT_LEAST_ONE_SUCCESS
+        #   condition_task:
+        #     op: EQUAL_TO
+        #     left: "{{job.parameters.move_csv_to_landing}}"
+        #     right: "true"
+
+        # - task_key: csv_file_mover
+        #   depends_on:
+        #     - task_key: move_csv_to_landing
+        #       outcome: "true"
+        #   notebook_task:
+        #     notebook_path: ../src/3.0-move-synthea-files-to-landing.py
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,29 @@
+resources:
+  pipelines:
+    pipeline_synthea_csv:
+      name: Synthea CSV Data Model Bronze and Silver Pipeline
+      configuration:
+        catalog_use: ${var.catalog}
+        schema_use: ${resources.schemas.data_gen_schema.name}
+        volume_use: ${resources.volumes.landing_volume.volume_path}
+        volume_sub_path_use: ""
+        resource_types: patients, encounters, claims_transactions, conditions,
+          medications, claims, devices, payers, imaging_studies
+      libraries:
+        - glob:
+            include: ../pipelines/data_sources/**
+        - glob:
+            include: ../pipelines/transformations/stage.py
+        - glob:
+            include: ../pipelines/transformations/encounters.sql
+      schema: ${resources.schemas.data_gen_schema.name}
+      development: true
+      photon: true
+      channel: PREVIEW
+      catalog: ${var.catalog}
+      serverless: true
+      event_log:
+        name: event_log_pipeline_bronze_and_silver_synthea_csv
+        schema: ${resources.schemas.data_gen_schema.name}
+        catalog: ${var.catalog}
+      root_path: ../pipelines
