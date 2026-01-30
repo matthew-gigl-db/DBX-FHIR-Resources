@@ -91,11 +91,6 @@ targets:
 
   
   prod:
-    # The default target uses 'mode: development' to create a development copy.
-    # - Deployed resources get prefixed with '[dev my_user_name]'
-    # - Any job schedules and triggers are paused by default.
-    # See also https://docs.databricks.com/dev-tools/bundles/deployment-modes.html.
-    mode: production
     presets:
       # name_prefix: '[${bundle.target} ${workspace.current_user.short_name}] '
       source_linked_deployment: false
@@ -113,6 +108,9 @@ targets:
     default: false
     workspace:
       host: https://fe-vm-mkgs-databricks-demos.cloud.databricks.com/
+    git:
+      origin_url: https://github.com/mkgs-databricks-demos/synthea-on-fhir.git
+      branch: main
     permissions:
       - user_name: matthew.giglia@databricks.com
         level: CAN_MANAGE
