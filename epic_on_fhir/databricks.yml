@@ -52,12 +52,13 @@ targets:
   prod:
     mode: production
     workspace:
-      host: https://fe-vm-mkgs-databricks-demos.cloud.databricks.com
-      # We explicitly deploy to /Workspace/Users/matthew.giglia@databricks.com to make sure we only have a single copy.
-      root_path: /Workspace/Users/matthew.giglia@databricks.com/.bundle/${bundle.name}/${bundle.target}
+      host: https://dbc-de8ffabd-1dae.cloud.databricks.com/
+      root_path: /Workspace/Users/matthewgiglia@mac.com/.bundle/${bundle.name}/${bundle.target}
     variables:
-      catalog: mkgs_dev
-      schema: prod
+      catalog: main
+      schema: epic_on_fhir
+      epic_kid: fy27fde
+      run_as_user: matthew.giglia@databricks.com
     permissions:
-      - user_name: matthew.giglia@databricks.com
+      - user_name: matthewgiglia@mac.com
         level: CAN_MANAGE
