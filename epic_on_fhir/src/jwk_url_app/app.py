@@ -43,3 +43,5 @@ def server(input: Inputs, output: Outputs, session: Session):
     async def jwks_route(request):
         from starlette.responses import JSONResponse
         return JSONResponse(JWKS)
+    
+app = App(app_ui, server)
