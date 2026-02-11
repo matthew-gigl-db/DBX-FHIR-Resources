@@ -19,16 +19,23 @@ variables:
   secret_scope_name: 
     description: The secret scope name to use for the Epic on FHIR credentials
     default: epic_on_fhir_oauth_keys
+  client_id_dbs_key:
+    description: The secret key name in the scope to return the correct client id for the EPIC on FHIR application.  Use "client_id" for non-production workflows, and "client_id_prod" for production workflows. 
+    default: client_id
   epic_kid: 
     description: The EPIC kid Used to Connect with JWT OAuth2
+  algo:
+    description: Encryption algorithm used. 
+    default: RS384
+  token_url:
+    description: Epic OAuth2 Token URL
+    default: https://fhir.epic.com/interconnect-fhir-oauth/oauth2/token
   run_as_user:
     description: The User that the workflows should run as.
   pipeline_run_as_user:
     description: The user or principal that the Spark Declarative Pipelines should run as.  
     default: ${var.run_as_user}
-  algo:
-    description: Encryption algorithm used. 
-    default: RS384
+  
 
   
 
