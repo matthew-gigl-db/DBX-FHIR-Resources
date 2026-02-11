@@ -1,10 +1,12 @@
-from shiny import App, ui, render, Inputs, Outputs, Session
-from shiny import reactive
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from jwcrypto import jwk
 import json
 import os
 from databricks.sdk import WorkspaceClient
 import sys
+import uvicorn
 
 w = WorkspaceClient()
 
@@ -37,30 +39,31 @@ def load_jwks():
 
 JWKS = load_jwks()
 
-# Minimal UI just to show the JWKS; Epic will call the JSON endpoint
-app_ui = ui.page_fluid(
-	ui.h2("Epic JWKS endpoint"),
-	ui.p("This app serves JWKS for Epic backend services."),
-	ui.output_text_verbatim("jwks_preview")
+# Create FastAPI app
+app = FastAPI(title="Epic JWKS Endpoint")
+
+app.add_middleware(
+    CORSMiddleware
+    , allow_origins=["*"]
+    , allow_credentials=False
+    , allow_methods=["GET"]
+    , allow_headers=["*"]
 )
 
-def server(input: Inputs, output: Outputs, session: Session):
+@app.get("/")
+async def root():
+	"""Root endpoint showing app info"""
+	return {
+		"message": "Epic JWKS Endpoint"
+		, "description": "This app serves JWKS for Epic backend services."
+		, "jwks_endpoint": "/.well-known/jwks.json"
+		, "jwks_preview": JWKS
+	}
 
-	@output
-	@render.text
-	def jwks_preview():
-		return json.dumps(JWKS, indent=2)
+@app.get("/.well-known/jwks.json")
+async def jwks_endpoint():
+	"""JWKS endpoint for Epic to consume"""
+	return JSONResponse(content=JWKS)
 
-	# # Expose a raw JWKS endpoint for Epic (Starlette route)
-	# @session.app.router.get("/.well-known/jwks.json")
-	# async def jwks_route(request):
-	# 	from starlette.responses import JSONResponse
-	# 	return JSONResponse(JWKS)
-
-# app = App(app_ui, server)
-
-# # Register route after app creation
-# @app.app.router.get("/.well-known/jwks.json")
-# async def jwks_route(request):
-#     from starlette.responses import JSONResponse
-#     return JSONResponse(JWKS)
+if __name__ == "__main__":
+	uvicorn.run(app, host="0.0.0.0", port=8000)
