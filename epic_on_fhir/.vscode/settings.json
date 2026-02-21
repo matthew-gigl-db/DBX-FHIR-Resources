@@ -29,7 +29,7 @@
     "cursorpyright.analysis.stubPath": ".vscode",
 
     // General Python settings
-    "python.defaultInterpreterPath": "./.venv/bin/python",
+    "python.defaultInterpreterPath": "${workspaceFolder}/epic_on_fhir/.venv/bin/python",
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true,
     "[python]": {
