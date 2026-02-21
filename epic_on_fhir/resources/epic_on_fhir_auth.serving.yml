@@ -1,0 +1,37 @@
+# Model serving endpoint for epic_on_fhir_auth.
+# Serves the Champion (best) version of the epic_on_fhir_auth registered model.
+# AI Gateway best practices: inference tables, usage tracking, rate limiting.
+# Note: Guardrails and fallbacks are not supported for custom model endpoints.
+
+resources:
+  model_serving_endpoints:
+    epic_on_fhir_auth_endpoint:
+      name: epic_on_fhir_auth-${bundle.target}
+      config:
+        served_entities:
+          - entity_name: ${resources.schemas.epic_on_fhir_schema.catalog_name}.${resources.schemas.epic_on_fhir_schema.name}.epic_on_fhir_auth
+            entity_version: Champion
+            name: epic_on_fhir_auth-champion
+            workload_size: Small
+            scale_to_zero_enabled: true
+        traffic_config:
+          routes:
+            - served_model_name: epic_on_fhir_auth-champion
+              traffic_percentage: 100
+      ai_gateway:
+        inference_table_config:
+          enabled: true
+          catalog_name: ${resources.schemas.epic_on_fhir_schema.catalog_name}
+          schema_name: ${resources.schemas.epic_on_fhir_schema.name}
+          table_name_prefix: epic_on_fhir_auth_inference
+        usage_tracking_config:
+          enabled: true
+        rate_limits:
+          - key: user
+            renewal_period: minute
+            calls: 60
+      permissions:
+        - level: CAN_QUERY
+          group_name: users
+        - level: CAN_MANAGE
+          user_name: ${var.run_as_user}
