@@ -1,0 +1,6 @@
+resources:
+  volumes:
+    mlflow_artifacts:
+      catalog_name: ${resources.schemas.epic_on_fhir_schema.catalog_name}
+      name: mlflow_artifacts
+      schema_name: ${resources.schemas.epic_on_fhir_schema.name}
