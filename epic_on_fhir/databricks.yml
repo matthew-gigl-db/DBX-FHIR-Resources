@@ -5,7 +5,6 @@ bundle:
   uuid: 6fff4968-d24d-4d81-9a83-d4d2e5a38493
 
 include:
-  # - resources/*.yml
   - resources/epic*.yml
   - resources/*app.yml
   - resources/*/*.yml
