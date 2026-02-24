@@ -7,7 +7,8 @@ Secrets are fetched from Databricks secret scope at predict time.
 
 import os
 
-import mlflow.pyfunc
+import mlflow
+from mlflow.pyfunc.utils import pyfunc
 import pandas as pd
 
 from epic_on_fhir.auth import EpicApiAuth
@@ -73,12 +74,21 @@ class EpicFhirPyfuncModel(mlflow.pyfunc.PythonModel):
         )
         return EpicApiRequest(auth=auth, base_url=self.base_url)
 
+    def load_context(self, context: mlflow.pyfunc.PythonModelContext):
+        """Load context."""
+        import os
+        import pandas as pd
+        from epic_on_fhir.auth import EpicApiAuth
+        from epic_on_fhir.endpoint import EpicApiRequest
+        self.api = self._make_api()
+
+    @pyfunc 
     def predict(self, model_input: pd.DataFrame, params=None) -> pd.DataFrame:
         """Make Epic FHIR request(s). Input columns: resource, action, http_method, data (optional)."""
         if model_input is None or len(model_input) == 0:
             return pd.DataFrame()
 
-        api = self._make_api()
+        api = self.api
         results = []
 
         for _, row in model_input.iterrows():
