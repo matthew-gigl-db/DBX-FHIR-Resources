@@ -1,0 +1,18 @@
+# Unity Catalog registered model for epic_on_fhir_auth.
+# Model versions are registered from runs in the epic_on_fhir_auth experiment.
+# The serving endpoint (epic_on_fhir_auth.serving.yml) deploys the Champion (best) version.
+
+resources:
+  registered_models:
+    epic_on_fhir_requests_model:
+      name: epic_on_fhir_requests
+      catalog_name: ${resources.schemas.epic_on_fhir_schema.catalog_name}
+      schema_name: ${resources.schemas.epic_on_fhir_schema.name}
+      comment: Epic on FHIR auth model - versions from epic_on_fhir_requests experiment
+      grants:
+        - principal: ${var.run_as_user}
+          privileges:
+            - ALL_PRIVILEGES
+        - principal: account users
+          privileges:
+            - EXECUTE

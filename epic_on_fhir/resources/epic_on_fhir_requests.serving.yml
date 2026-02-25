@@ -1,0 +1,43 @@
+# Model serving endpoint for epic_on_fhir_requests.
+# Uses Champion alias - set it after promoting best run: client.set_registered_model_alias(name, "Champion", version).
+# AI Gateway best practices: inference tables, usage tracking, rate limiting.
+# Note: Guardrails and fallbacks are not supported for custom model endpoints.
+
+resources:
+  model_serving_endpoints:
+    epic_on_fhir_requests_endpoint:
+      name: epic_on_fhir_requests
+      description: Endpoint for handling requests to Open Epic's Smart-On-FHIR APIs
+      config:
+        served_entities:
+          - entity_name: ${resources.registered_models.epic_on_fhir_requests_model.id}
+            entity_version: ${var.model_deployment_version}
+            name: epic_on_fhir_requests_endpoint
+            workload_size: Small
+            scale_to_zero_enabled: true
+            environment_vars:
+              ENABLE_FEATURE_TRACING: "true"
+              EPIC_CLIENT_ID: "{{secrets/epic_on_fhir_oauth_keys/${var.client_id_dbs_key}}"
+              EPIC_KID: "{{secrets/epic_on_fhir_oauth_keys/kid}}"
+              EPIC_PRIVATE_KEY: "{{secrets/epic_on_fhir_oauth_keys/private_key}}"
+        traffic_config:
+          routes:
+            - served_model_name: epic_on_fhir_requests_endpoint
+              traffic_percentage: 100
+      ai_gateway:
+        inference_table_config:
+          enabled: true
+          catalog_name: ${resources.schemas.epic_on_fhir_schema.catalog_name}
+          schema_name: ${resources.schemas.epic_on_fhir_schema.name}
+          table_name_prefix: epic_on_fhir_requests_inference
+        usage_tracking_config:
+          enabled: true
+        rate_limits:
+          - key: user
+            renewal_period: minute
+            calls: 60
+      permissions:
+        - level: CAN_QUERY
+          group_name: users
+        - level: CAN_MANAGE
+          user_name: ${var.run_as_user}
