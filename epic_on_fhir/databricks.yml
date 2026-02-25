@@ -53,8 +53,23 @@ targets:
       catalog: mkgs_dev
       schema: epic_on_fhir
       run_as_user: matthew.giglia@databricks.com
+      client_id_dbs_key: client_id
 
+  sandbox_prod:
+    mode: production
+    workspace:
+      host: https://dbc-de8ffabd-1dae.cloud.databricks.com/
+      root_path: /Workspace/epic-on-fhir/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: mkgs
+      schema: epic_on_fhir
+      run_as_user: matthew.giglia@databricks.com
+      client_id_dbs_key: client_id
+    permissions:
+      - user_name: matthewgiglia@mac.com
+        level: CAN_MANAGE
 
+# use only with real production Epic On FHIR Endpoints, Otherwise Use sandbox_prod target
   prod:
     mode: production
     workspace:
@@ -64,6 +79,7 @@ targets:
       catalog: main
       schema: epic_on_fhir
       run_as_user: matthew.giglia@databricks.com
+      client_id_dbs_key: client_id_prod
     permissions:
       - user_name: matthewgiglia@mac.com
         level: CAN_MANAGE
