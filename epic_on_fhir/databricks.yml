@@ -57,7 +57,7 @@ targets:
       schema: epic_on_fhir
       run_as_user: matthew.giglia@databricks.com
       client_id_dbs_key: client_id
-      model_deployment_version: "14"
+      model_deployment_version: "16"
 
   sandbox_prod:
     mode: production

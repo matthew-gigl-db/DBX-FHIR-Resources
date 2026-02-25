@@ -31,15 +31,11 @@ class EpicFhirPyfuncModel(mlflow.pyfunc.PythonModel):
 
     def __init__(
         self,
-        secret_scope_name: str,
-        client_id_dbs_key: str,
         token_url: str,
         algo: str,
         base_url: str = "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4/"
         # dbutils=dbutils
     ):
-        self.secret_scope_name = secret_scope_name
-        self.client_id_dbs_key = client_id_dbs_key
         self.token_url = token_url
         self.algo = algo
         self.base_url = base_url.rstrip("/") + "/"
