@@ -6,7 +6,7 @@ bundle:
 
 include:
   # - resources/*app.yml
-  # - resources/*serving.yml
+  - resources/*serving.yml
   - resources/*schema.yml
   - resources/*experiment.yml
   - resources/*model.yml
