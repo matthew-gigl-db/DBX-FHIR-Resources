@@ -111,7 +111,7 @@ targets:
       schema: epic_on_fhir
       run_as_user: matthew.giglia@databricks.com
       client_id_dbs_key: client_id
-      model_deployment_version: "18"
+      model_deployment_version: "19"
 
 # assumes that a folder path of /Workspace/epic-on-fhir/ has been set up previously on the host workspace and that a service principal with appropriate permissions in Unity Catalog has been created and added below for the higher_level_service_principal variable.  
   sandbox_prod:
