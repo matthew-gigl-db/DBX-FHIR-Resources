@@ -29,7 +29,7 @@ resources:
           enabled: true
           catalog_name: ${resources.schemas.epic_on_fhir_schema.catalog_name}
           schema_name: ${resources.schemas.epic_on_fhir_schema.name}
-          table_name_prefix: epic_on_fhir_requests_endpoint_${var.model_deployment_version}
+          table_name_prefix: epic_on_fhir_requests_endpoint
         usage_tracking_config:
           enabled: true
         rate_limits:
