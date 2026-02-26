@@ -1,0 +1,10 @@
+[project]
+name = "redox-mcp-http-proxy"
+version = "0.1.0"
+dependencies = [
+  "fastapi",
+  "uvicorn",
+]
+
+[project.scripts]
+redox-http-proxy = "redox_http_proxy:main"
