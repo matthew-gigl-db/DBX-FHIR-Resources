@@ -5,7 +5,7 @@ from smart_on_fhir.epic_fhir_pyfunc import EpicFhirPyfuncModel
 
 model = EpicFhirPyfuncModel(
 	token_url="https://fhir.epic.com/interconnect-fhir-oauth/oauth2/token",
-	algo="RS384",
+	algo="RS384"
 )
 
 set_model(model)
