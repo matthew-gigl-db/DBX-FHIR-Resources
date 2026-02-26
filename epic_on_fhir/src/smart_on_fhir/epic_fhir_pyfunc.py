@@ -92,6 +92,9 @@ class EpicFhirPyfuncModel(mlflow.pyfunc.PythonModel):
                     data=data,
                 )
                 response = out['response']
+                # Convert CaseInsensitiveDict headers to regular dict for JSON serialization
+                if 'response_headers' in response:
+                    response['response_headers'] = dict(response['response_headers'])
                 results.append(response)
             except Exception as e:
                 results.append({"response": str(e)})
