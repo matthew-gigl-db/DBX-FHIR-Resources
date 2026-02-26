@@ -42,6 +42,21 @@ variables:
   model_deployment_version:
     description: The version of the model to deploy with the bundle
     default: "1"
+  tags_project: 
+    default: Open Epic Smart on FHIR
+    description: Project tag to use for deployed resources.  
+  tags_businessUnit:
+    default: Healthcare and Life Sciences
+    description: Business Unit tag to use for deployed resource cost and ROI allocation. 
+  tags_developer:
+    default: matthew.giglia@databricks.com
+    description: Primary developer for Ops contact. 
+  tags_requestedBy:
+    default: Healthcare Providers and Health Plans
+    description: Tag for the primary business unit stakeholder(s).  
+  tags_RemoveAfter:
+    default: 2027-02-25
+    description: Required Databricks demo environment tag for long lived demos.  Can not be set more than one year after the deployment date. 
   
 
   
@@ -54,6 +69,13 @@ targets:
     # See also https://docs.databricks.com/dev-tools/bundles/deployment-modes.html.
     presets:
       source_linked_deployment: false
+      tags:
+        project: ${var.tags_project}
+        businessUnit: ${var.tags_businessUnit}
+        requestedBy: ${var.tags_requestedBy}
+        developer: ${var.tags_developer}
+        RemoveAfter: ${var.tags_RemoveAfter}
+        env: ${bundle.target}
     mode: development
     default: true
     workspace:
@@ -97,6 +119,13 @@ targets:
     presets:
       name_prefix: "[sandbox] "
       source_linked_deployment: false
+      tags:
+        project: ${var.tags_project}
+        businessUnit: ${var.tags_businessUnit}
+        requestedBy: ${var.tags_requestedBy}
+        developer: ${var.tags_developer}
+        RemoveAfter: ${var.tags_RemoveAfter}
+        env: ${bundle.target}
     workspace:
       host: https://dbc-de8ffabd-1dae.cloud.databricks.com/
       root_path: /Workspace/epic-on-fhir/.bundle/${bundle.name}/${bundle.target}
