@@ -1,0 +1,6 @@
+resources:
+  volumes:
+    source_bin:
+      catalog_name: ${resources.schemas.epic_on_fhir_schema.catalog_name}
+      name: bin
+      schema_name: ${resources.schemas.epic_on_fhir_schema.name}

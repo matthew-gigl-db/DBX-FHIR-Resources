@@ -1,0 +1,41 @@
+resources:
+  apps:
+    redox_mcp_serving_app:
+      name: "redox-mcp"
+      source_code_path: ../src/redox_mcp_serving_app/
+      description: "An application to serve the Redox MCP Server on Databricks"
+      lifecycle:
+        prevent_destroy: true
+      config:
+        command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+        env: 
+          - name: ALGO
+            value: ${var.algo}
+          - name: SECRET_SCOPE_NAME
+            value: ${var.secret_scope_name}
+      resources:
+        - name: "redox-public-key"
+          description: "Redox Authentication Public Key"
+          secret: 
+            scope: ${var.secret_scope_name}
+            key: public_key
+            permission: "READ"
+        - name: "redox-kid"
+          description: "Redox Authentication KID"
+          secret: 
+            scope: ${var.secret_scope_name}
+            key: kid
+            permission: "READ"
+        - name: "redox-private-key"
+          description: "Redox Authentication Private Key"
+          secret: 
+            scope: ${var.secret_scope_name}
+            key: private_key
+            permission: "READ"
+        - name: "redox-client-id"
+          description: "Redox Authentication Client ID"
+          secret: 
+            scope: ${var.secret_scope_name}
+            key: ${var.client_id_dbs_key}
+            permission: "READ"
+      
