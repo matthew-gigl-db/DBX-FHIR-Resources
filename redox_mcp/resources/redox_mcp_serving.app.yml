@@ -43,4 +43,4 @@ resources:
           uc_securable: 
             securable_type: VOLUME
             securable_full_name: ${resources.volumes.source_bin.catalog_name}.${resources.volumes.source_bin.schema_name}.${resources.volumes.source_bin.name}
-            permission: "READ"
+            permission: READ_VOLUME
