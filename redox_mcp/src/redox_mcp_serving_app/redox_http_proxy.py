@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional, List
 
 from databricks.sdk import WorkspaceClient
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel
 
 def handle_exception(exc_type, exc_value, exc_traceback):
@@ -124,6 +124,7 @@ class RedoxMCPProcess:
         self._proc: Optional[subprocess.Popen] = None
         self._pending: dict[Any, asyncio.Future] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._tools_cache: Optional[List[Dict[str, Any]]] = None
         print(f"[redox-proxy] RedoxMCPProcess initialized with command: {self._cmd}", file=sys.stderr)
 
     async def start(self) -> None:
@@ -267,6 +268,30 @@ class RedoxMCPProcess:
             print(f"[redox-proxy] Timeout waiting for response to request ID: {rpc_id}", file=sys.stderr)
             raise HTTPException(status_code=504, detail=f"Timeout waiting for MCP response")
 
+    def is_alive(self) -> bool:
+        """Check if the MCP process is running"""
+        return self._proc is not None and self._proc.poll() is None
+
+    async def list_tools(self) -> List[Dict[str, Any]]:
+        """Query the MCP server for available tools"""
+        if self._tools_cache is not None:
+            return self._tools_cache
+        
+        response = await self.send({
+            "jsonrpc": "2.0",
+            "method": "tools/list",
+            "id": "list_tools_req",
+            "params": {}
+        })
+        
+        if "error" in response:
+            print(f"[redox-proxy] Error listing tools: {response['error']}", file=sys.stderr)
+            raise HTTPException(status_code=500, detail=f"MCP error: {response['error']}")
+        
+        tools = response.get("result", {}).get("tools", [])
+        self._tools_cache = tools
+        return tools
+
     async def stop(self) -> None:
         if self._proc is None:
             return
@@ -321,6 +346,61 @@ except Exception as e:
     print(f"[redox-proxy] Traceback: {traceback.format_exc()}", file=sys.stderr)
     raise
 
+@app.get("/")
+async def root():
+    """Root endpoint with basic info"""
+    return {
+        "service": "Redox MCP HTTP Proxy"
+        , "status": "running"
+        , "mcp_process_alive": redox_proc.is_alive()
+        , "endpoints": {
+            "health": "/health"
+            , "tools": "/tools"
+            , "mcp": "/mcp"
+        }
+    }
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring"""
+    is_alive = redox_proc.is_alive()
+    
+    if not is_alive:
+        return Response(
+            content=json.dumps({
+                "status": "unhealthy"
+                , "mcp_process": "stopped"
+                , "message": "MCP process is not running"
+            })
+            , status_code=503
+            , media_type="application/json"
+        )
+    
+    return {
+        "status": "healthy"
+        , "mcp_process": "running"
+        , "redox_api_endpoint": "https://api.redoxengine.com/"
+    }
+
+@app.get("/tools")
+async def list_tools():
+    """List all available tools from the MCP server"""
+    try:
+        await redox_proc.start()
+        tools = await redox_proc.list_tools()
+        return {
+            "tools": tools
+            , "count": len(tools)
+            , "redox_api_connected": True
+        }
+    except Exception as e:
+        print(f"[redox-proxy] Error listing tools: {e}", file=sys.stderr)
+        print(f"[redox-proxy] Traceback: {traceback.format_exc()}", file=sys.stderr)
+        raise HTTPException(
+            status_code=500
+            , detail=f"Failed to list tools. This may indicate authentication issues with Redox API: {str(e)}"
+        )
+
 @app.post("/mcp")
 async def mcp_endpoint(req: JsonRpcRequest) -> Dict[str, Any]:
     print(f"[redox-proxy] MCP endpoint called with method: {req.method}", file=sys.stderr)
@@ -329,6 +409,17 @@ async def mcp_endpoint(req: JsonRpcRequest) -> Dict[str, Any]:
     try:
         resp = await redox_proc.send(request_dict)
         print(f"[redox-proxy] Returning response: {json.dumps(resp)[:200]}...", file=sys.stderr)
+        
+        # Check for errors in the response and provide better debugging
+        if "error" in resp:
+            error_detail = resp["error"]
+            print(f"[redox-proxy] MCP returned error: {error_detail}", file=sys.stderr)
+            
+            # Check if it's an authentication error
+            error_message = error_detail.get("message", "")
+            if "auth" in error_message.lower() or "unauthorized" in error_message.lower():
+                print(f"[redox-proxy] AUTHENTICATION ERROR detected with Redox API", file=sys.stderr)
+        
         return resp
     except Exception as e:
         print(f"[redox-proxy] Error in mcp_endpoint: {e}", file=sys.stderr)
