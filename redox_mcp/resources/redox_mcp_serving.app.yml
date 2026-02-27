@@ -13,17 +13,6 @@ resources:
             value: ${var.secret_scope_name}
           - name: REDOX_BINARY_PATH
             value: ${resources.volumes.source_bin.volume_path}/redox-mcp
-      # Network configuration to allow external API access
-      network:
-        egress:
-          # Allow access to Redox API servers
-          - destination: "api.redoxengine.com"
-            port: 443
-            protocol: "https"
-          # Allow general HTTPS for OAuth/API calls
-          - destination: "0.0.0.0/0"
-            port: 443
-            protocol: "tcp"
       resources:
         - name: "redox-public-key"
           description: "Redox Authentication Public Key"

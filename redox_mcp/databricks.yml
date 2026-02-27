@@ -87,6 +87,31 @@ targets:
       client_id_dbs_key: client_id
       token_url: 'https://api.redoxengine.com/fhir/R4/redox-fhir-sandbox/Development/'
 
+  free_edition:
+    mode: production
+    presets:
+      source_linked_deployment: false
+      tags:
+        project: ${var.tags_project}
+        businessUnit: ${var.tags_businessUnit}
+        requestedBy: ${var.tags_requestedBy}
+        developer: ${var.tags_developer}
+        RemoveAfter: ${var.tags_RemoveAfter}
+        env: ${bundle.target}
+    workspace:
+      host: https://dbc-e5684c0a-20fa.cloud.databricks.com/
+      root_path: /Workspace/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: 
+      schema: redox
+      higher_level_service_princiapl: 0ab13318-f064-41b4-a49a-0fd18ceb2d0f
+      run_as_user: ${var.higher_level_service_principal}
+      client_id_dbs_key: client_id
+      token_url: 'https://api.redoxengine.com/fhir/R4/redox-fhir-sandbox/Staging/'
+    permissions:
+      - user_name: matthew.giglia@databricks.com
+        level: CAN_MANAGE
+
   # The 'prod' target, used for production deployment.
   prod:
     mode: production
