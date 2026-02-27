@@ -119,7 +119,7 @@ class RedoxMCPProcess:
     def __init__(self, cmd: Optional[List[str]] = None):
         print(f"[redox-proxy] Initializing RedoxMCPProcess...", file=sys.stderr)
         if cmd is None:
-            cmd = [REDOX_BINARY_PATH]
+            cmd = [REDOX_BINARY_PATH, "--stdio"]
         self._cmd: List[str] = [str(c) for c in cmd if c is not None]
         self._proc: Optional[subprocess.Popen] = None
         self._pending: dict[Any, asyncio.Future] = {}
@@ -139,12 +139,16 @@ class RedoxMCPProcess:
         print(f"[redox-proxy]   OAUTH_KEY_ID: {os.environ.get('OAUTH_KEY_ID', 'NOT SET')[:20]}...", file=sys.stderr)
         print(f"[redox-proxy]   OAUTH_KEY_PATH: {os.environ.get('OAUTH_KEY_PATH', 'NOT SET')}", file=sys.stderr)
         try:
+            # Copy current environment and pass it to subprocess
+            env = os.environ.copy()
+            
             self._proc = subprocess.Popen(
                 self._cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 bufsize=0,
+                env=env,
             )
             print(f"[redox-proxy] MCP process started with PID: {self._proc.pid}", file=sys.stderr)
             await asyncio.sleep(0.5)
