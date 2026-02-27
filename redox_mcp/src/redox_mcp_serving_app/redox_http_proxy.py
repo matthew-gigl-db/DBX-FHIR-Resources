@@ -6,6 +6,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
 from databricks.sdk import WorkspaceClient
@@ -20,7 +21,14 @@ if REDOX_BINARY_PATH and not os.access(REDOX_BINARY_PATH, os.X_OK):
 
 # Initialize Databricks client for accessing secrets
 w = WorkspaceClient()
-SECRET_SCOPE_NAME = os.environ.get("SECRET_SCOPE_NAME")
+SECRET_SCOPE_NAME = os.environ.get("SECRET_SCOPE_NAME", "redox_oauth_keys")
+
+# Validate that secret scope name is available
+if not SECRET_SCOPE_NAME:
+    raise ValueError("SECRET_SCOPE_NAME environment variable is required but was not set")
+
+print(f"[redox-proxy] Using secret scope: {SECRET_SCOPE_NAME}", file=sys.stderr)
+
 PRIVATE_KEY = w.secrets.get_secret(scope=SECRET_SCOPE_NAME, key="private_key").value
 KID = w.secrets.get_secret(scope=SECRET_SCOPE_NAME, key="kid").value
 CLIENT_ID = w.secrets.get_secret(scope=SECRET_SCOPE_NAME, key="client_id").value
@@ -146,15 +154,15 @@ class RedoxMCPProcess:
 # Global instance reused across HTTP requests
 redox_proc = RedoxMCPProcess()
 
-app = FastAPI()
-
-@app.on_event("startup")
-async def startup_event() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Start the Redox MCP process
     await redox_proc.start()
-
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
+    yield
+    # Shutdown: Stop the Redox MCP process
     await redox_proc.stop()
+
+app = FastAPI(lifespan=lifespan)
 
 @app.post("/mcp")
 async def mcp_endpoint(req: JsonRpcRequest) -> Dict[str, Any]:
