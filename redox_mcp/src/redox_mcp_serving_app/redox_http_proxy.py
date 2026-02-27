@@ -14,6 +14,18 @@ from databricks.sdk import WorkspaceClient
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+# Set up global exception handler
+def handle_exception(exc_type, exc_value, exc_traceback):
+    """Global exception handler to catch any unhandled exceptions"""
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    print(f"[redox-proxy] UNCAUGHT EXCEPTION: {exc_type.__name__}: {exc_value}", file=sys.stderr)
+    print(f"[redox-proxy] Traceback:", file=sys.stderr)
+    traceback.print_exception(exc_type, exc_value, exc_traceback, file=sys.stderr)
+
+sys.excepthook = handle_exception
+
 # Initialize Databricks client for accessing secrets and files
 w = WorkspaceClient()
 
@@ -308,18 +320,28 @@ print(f"[redox-proxy] Defining lifespan context manager...", file=sys.stderr)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Start the Redox MCP process
-    print(f"[redox-proxy] FastAPI lifespan startup", file=sys.stderr)
+    print(f"[redox-proxy] FastAPI lifespan startup BEGIN", file=sys.stderr)
+    sys.stderr.flush()  # Force flush to ensure log appears
     try:
+        print(f"[redox-proxy] About to call redox_proc.start()...", file=sys.stderr)
+        sys.stderr.flush()
         await redox_proc.start()
         print(f"[redox-proxy] Redox MCP process started successfully", file=sys.stderr)
+        sys.stderr.flush()
     except Exception as e:
         print(f"[redox-proxy] ERROR starting redox process: {e}", file=sys.stderr)
         print(f"[redox-proxy] Traceback: {traceback.format_exc()}", file=sys.stderr)
+        sys.stderr.flush()
         raise
+    print(f"[redox-proxy] Lifespan startup complete, yielding...", file=sys.stderr)
+    sys.stderr.flush()
     yield
     # Shutdown: Stop the Redox MCP process
-    print(f"[redox-proxy] FastAPI lifespan shutdown", file=sys.stderr)
+    print(f"[redox-proxy] FastAPI lifespan shutdown BEGIN", file=sys.stderr)
+    sys.stderr.flush()
     await redox_proc.stop()
+    print(f"[redox-proxy] FastAPI lifespan shutdown COMPLETE", file=sys.stderr)
+    sys.stderr.flush()
 
 print(f"[redox-proxy] Creating FastAPI app...", file=sys.stderr)
 try:
@@ -351,8 +373,23 @@ async def mcp_endpoint(req: JsonRpcRequest) -> Dict[str, Any]:
     return resp
 
 print(f"[redox-proxy] Module initialization complete, ready to serve!", file=sys.stderr)
+sys.stderr.flush()
 
 def main() -> None:
-    import uvicorn
+    print(f"[redox-proxy] main() function called, starting uvicorn...", file=sys.stderr)
+    sys.stderr.flush()
+    try:
+        import uvicorn
+        print(f"[redox-proxy] Uvicorn imported, calling run()...", file=sys.stderr)
+        sys.stderr.flush()
+        uvicorn.run(app, host="0.0.0.0", port=8000, log_level="debug")
+    except Exception as e:
+        print(f"[redox-proxy] ERROR in main(): {e}", file=sys.stderr)
+        print(f"[redox-proxy] Traceback: {traceback.format_exc()}", file=sys.stderr)
+        sys.stderr.flush()
+        raise
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+if __name__ == "__main__":
+    print(f"[redox-proxy] Running as __main__", file=sys.stderr)
+    sys.stderr.flush()
+    main()
