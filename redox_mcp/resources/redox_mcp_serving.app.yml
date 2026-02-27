@@ -41,5 +41,6 @@ resources:
         - name: "bin-volume"
           description: "Volume containing the Redox MCP Linux x86-64 binary"
           uc_securable: 
-            full_name: ${resources.volumes.source_bin.catalog_name}.${resources.volumes.source_bin.schema_name}.${resources.volumes.source_bin.name}
+            securable_type: VOLUME
+            securable_full_name: ${resources.volumes.source_bin.catalog_name}.${resources.volumes.source_bin.schema_name}.${resources.volumes.source_bin.name}
             permission: "READ"
