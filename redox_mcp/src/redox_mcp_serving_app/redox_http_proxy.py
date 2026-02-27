@@ -246,7 +246,9 @@ class RedoxMCPProcess:
         assert self._proc is not None and self._proc.stdin is not None
         rpc_id = request.get("id")
         data = json.dumps(request) + "\n"
-        print(f"[redox-proxy] Sending request: {json.dumps(request)[:200]}...", file=sys.stderr)
+        print(f"[redox-proxy] Sending COMPLETE request (not truncated):", file=sys.stderr)
+        print(json.dumps(request, indent=2), file=sys.stderr)
+        print(f"[redox-proxy] Request length: {len(data)} bytes", file=sys.stderr)
         self._proc.stdin.write(data.encode("utf-8"))
         self._proc.stdin.flush()
         
