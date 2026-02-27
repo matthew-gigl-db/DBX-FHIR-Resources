@@ -85,6 +85,7 @@ targets:
       schema: redox
       run_as_user: matthew.giglia@databricks.com
       client_id_dbs_key: client_id
+      token_url: 'https://api.redoxengine.com/fhir/R4/redox-fhir-sandbox/Development/'
 
   # The 'prod' target, used for production deployment.
   prod:
@@ -109,6 +110,7 @@ targets:
       higher_level_service_principal: 47c0365e-b1af-429c-b56d-07cfb18b5dc7
       run_as_user: ${var.higher_level_service_principal}
       client_id_dbs_key: client_id
+      token_url: 'https://api.redoxengine.com/fhir/R4/redox-fhir-sandbox/Staging/'
     permissions:
       - user_name: matthew.giglia@databricks.com
         level: CAN_MANAGE
