@@ -7,4 +7,8 @@ resources:
           privileges:
             - MANAGE
             - ALL_PRIVILEGES
+        - principal: matthew.giglia@databricks.com
+          privileges:
+            - MANAGE
+            - ALL_PRIVILEGES
       catalog_name: ${var.catalog}

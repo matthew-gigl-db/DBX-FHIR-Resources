@@ -3,7 +3,9 @@ bundle:
   name: "redox_mcp"
 
 include:
-  - resources/*.yml
+  - resources/*.volume.yml
+  - resources/*.schema.yml
+  # - resources/*.app.yml
   - resources/*/*.yml
 
 # Variable declarations. These variables are assigned in the dev/prod targets below.
