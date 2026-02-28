@@ -115,58 +115,6 @@ def initialize_secrets():
         
         print(f"[redox-proxy] All required environment variables validated successfully", file=sys.stderr)
         
-        # Use REDOX_ prefixed values as primary
-        CLIENT_ID = REDOX_CLIENT_ID
-        PRIVATE_KEY = REDOX_PRIVATE_KEY
-        KID = REDOX_PUBLIC_KEY_ID
-        
-        # Write private key to temp file first
-        print(f"[redox-proxy] Writing private key to temp file...", file=sys.stderr)
-        temp_key_file = tempfile.NamedTemporaryFile(
-            mode='w'
-            , delete=False
-            , suffix='.pem'
-        )
-        temp_key_file.write(PRIVATE_KEY)
-        temp_key_file.close()
-        os.chmod(temp_key_file.name, 0o600)
-        
-        # Set ALL possible environment variable name variants that Redox MCP might expect
-        # Standard OAuth names (no prefix)
-        os.environ["CLIENT_ID"] = CLIENT_ID
-        os.environ["KEY_ID"] = KID
-        os.environ["PRIVATE_KEY_PATH"] = temp_key_file.name
-        os.environ["KEY_PATH"] = temp_key_file.name
-        
-        # OAUTH_ prefixed names (ensure they are set even if already present)
-        os.environ["OAUTH_CLIENT_ID"] = OAUTH_CLIENT_ID
-        os.environ["OAUTH_KEY_ID"] = OAUTH_KEY_ID
-        os.environ["OAUTH_KEY_PATH"] = temp_key_file.name
-        os.environ["OAUTH_PRIVATE_KEY"] = OAUTH_PRIVATE_KEY
-        
-        # REDOX_ prefixed names (ensure they are set even if already present)
-        os.environ["REDOX_CLIENT_ID"] = REDOX_CLIENT_ID
-        os.environ["REDOX_KEY_ID"] = REDOX_PUBLIC_KEY_ID
-        os.environ["REDOX_PUBLIC_KEY_ID"] = REDOX_PUBLIC_KEY_ID
-        os.environ["REDOX_PRIVATE_KEY"] = REDOX_PRIVATE_KEY
-        os.environ["REDOX_PRIVATE_KEY_PATH"] = temp_key_file.name
-        
-        # Also try uppercase variants
-        os.environ["CLIENTID"] = CLIENT_ID
-        os.environ["KEYID"] = KID
-        
-        print(f"[redox-proxy] Environment variables retrieved and set", file=sys.stderr)
-        print(f"[redox-proxy] Private key written to: {temp_key_file.name}", file=sys.stderr)
-        print(f"[redox-proxy] Configuration summary:", file=sys.stderr)
-        print(f"[redox-proxy]   REDOX_CLIENT_ID length: {len(REDOX_CLIENT_ID)}", file=sys.stderr)
-        print(f"[redox-proxy]   OAUTH_CLIENT_ID length: {len(OAUTH_CLIENT_ID)}", file=sys.stderr)
-        print(f"[redox-proxy]   REDOX_PUBLIC_KEY_ID length: {len(REDOX_PUBLIC_KEY_ID)}", file=sys.stderr)
-        print(f"[redox-proxy]   OAUTH_KEY_ID length: {len(OAUTH_KEY_ID)}", file=sys.stderr)
-        print(f"[redox-proxy]   REDOX_PRIVATE_KEY length: {len(REDOX_PRIVATE_KEY)}", file=sys.stderr)
-        print(f"[redox-proxy]   OAUTH_PRIVATE_KEY length: {len(OAUTH_PRIVATE_KEY)}", file=sys.stderr)
-        print(f"[redox-proxy]   Key file path: {temp_key_file.name}", file=sys.stderr)
-        print(f"[redox-proxy]   Key file exists: {os.path.exists(temp_key_file.name)}", file=sys.stderr)
-        
     except Exception as e:
         print(f"[redox-proxy] ERROR initializing secrets: {e}", file=sys.stderr)
         print(f"[redox-proxy] Traceback: {traceback.format_exc()}", file=sys.stderr)
