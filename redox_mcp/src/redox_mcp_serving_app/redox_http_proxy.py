@@ -1,170 +1,225 @@
 # redox_http_proxy.py
 import asyncio
+import hashlib
 import json
+import logging
 import os
 import signal
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Dict, Optional, List
 
 from databricks.sdk import WorkspaceClient
-from fastapi import FastAPI, HTTPException, Response
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Response, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
 
-print(f"[redox-proxy] ALL ENV VARS: {list(os.environ.keys())}", file=sys.stderr)
+# ============================================================================
+# Logging Configuration
+# ============================================================================
+logging.basicConfig(
+    level=logging.INFO
+    , format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    , handlers=[logging.StreamHandler(sys.stderr)]
+)
+logger = logging.getLogger("redox-proxy")
 
-def handle_exception(exc_type, exc_value, exc_traceback):
-    if issubclass(exc_type, KeyboardInterrupt):
-        sys.__excepthook__(exc_type, exc_value, exc_traceback)
-        return
-    print(f"[redox-proxy] UNCAUGHT EXCEPTION: {exc_type.__name__}: {exc_value}", file=sys.stderr)
-    print(f"[redox-proxy] Traceback:", file=sys.stderr)
-    traceback.print_exception(exc_type, exc_value, exc_traceback, file=sys.stderr)
+# ============================================================================
+# Configuration Management with Pydantic Settings
+# ============================================================================
+class Settings(BaseSettings):
+    """Application configuration from environment variables"""
+    redox_client_id: str = Field(..., env="REDOX_CLIENT_ID")
+    redox_private_key: str = Field(..., env="REDOX_PRIVATE_KEY")
+    redox_public_key_id: str = Field(..., env="REDOX_PUBLIC_KEY_ID")
+    oauth_private_key: str = Field(..., env="OAUTH_PRIVATE_KEY")
+    oauth_client_id: str = Field(..., env="OAUTH_CLIENT_ID")
+    oauth_key_id: str = Field(..., env="OAUTH_KEY_ID")
+    redox_binary_volume: str = Field(..., env="REDOX_BINARY_VOLUME")
+    
+    # Optional configuration
+    request_timeout: float = Field(35.0, env="REQUEST_TIMEOUT")
+    max_restart_attempts: int = Field(3, env="MAX_RESTART_ATTEMPTS")
+    restart_delay: float = Field(2.0, env="RESTART_DELAY")
+    
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
 
-sys.excepthook = handle_exception
+# ============================================================================
+# Error Models
+# ============================================================================
+class ErrorResponse(BaseModel):
+    """Standardized error response"""
+    error_code: str
+    message: str
+    details: Optional[Dict[str, Any]] = None
 
-w = WorkspaceClient()
-
-REDOX_BINARY_PATH = None
-
-def initialize_binary():
-    global REDOX_BINARY_PATH
-    try:
-        VOLUME_BINARY_PATH = f"{os.environ.get('REDOX_BINARY_VOLUME')}/redox-mcp-linux-x64"
-        print(f"[redox-proxy] Downloading binary from volume: {VOLUME_BINARY_PATH}", file=sys.stderr)
-        temp_binary = tempfile.NamedTemporaryFile(
-            mode='wb'
-            , delete=False
-            , suffix='-redox-mcp'
-        )
-        temp_binary_path = temp_binary.name
-        print(f"[redox-proxy] Initiating download...", file=sys.stderr)
-        response = w.files.download(VOLUME_BINARY_PATH)
-        print(f"[redox-proxy] Download complete, writing to temp file...", file=sys.stderr)
-        temp_binary.write(response.contents.read())
-        temp_binary.close()
-        print(f"[redox-proxy] Binary downloaded to: {temp_binary_path}", file=sys.stderr)
-        os.chmod(temp_binary_path, 0o755)
-        print(f"[redox-proxy] Set executable permissions on binary", file=sys.stderr)
-        REDOX_BINARY_PATH = temp_binary_path
-        print(f"[redox-proxy] Binary ready at: {REDOX_BINARY_PATH}", file=sys.stderr)
-        print(f"[redox-proxy] Testing binary execution...", file=sys.stderr)
-        try:
-            test_result = subprocess.run(
-                [REDOX_BINARY_PATH, "--version"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            print(f"[redox-proxy] Binary test - return code: {test_result.returncode}", file=sys.stderr)
-            print(f"[redox-proxy] Binary test - stdout: {test_result.stdout}", file=sys.stderr)
-            print(f"[redox-proxy] Binary test - stderr: {test_result.stderr}", file=sys.stderr)
-        except Exception as test_e:
-            print(f"[redox-proxy] WARNING: Binary test failed: {test_e}", file=sys.stderr)
-    except Exception as e:
-        print(f"[redox-proxy] ERROR initializing binary: {e}", file=sys.stderr)
-        print(f"[redox-proxy] Traceback: {traceback.format_exc()}", file=sys.stderr)
-        raise
-
-def initialize_secrets():
-    try:
-        print(f"[redox-proxy] Validating required environment variables...", file=sys.stderr)
-        
-        # Define all required environment variables
-        required_vars = [
-            "REDOX_CLIENT_ID"
-            , "REDOX_PRIVATE_KEY"
-            , "REDOX_PUBLIC_KEY_ID"
-            , "OAUTH_PRIVATE_KEY"
-            , "OAUTH_CLIENT_ID"
-            , "OAUTH_KEY_ID"
-        ]
-        
-        # Validate each required variable
-        missing_vars = []
-        empty_vars = []
-        
-        for var_name in required_vars:
-            value = os.environ.get(var_name)
-            if value is None:
-                missing_vars.append(var_name)
-                print(f"[redox-proxy] ERROR: {var_name} is not set", file=sys.stderr)
-            elif len(value) == 0:
-                empty_vars.append(var_name)
-                print(f"[redox-proxy] ERROR: {var_name} is empty", file=sys.stderr)
-            else:
-                print(f"[redox-proxy] ✓ {var_name} validated (length: {len(value)})", file=sys.stderr)
-        
-        # Report all validation errors at once
-        if missing_vars or empty_vars:
-            error_messages = []
-            if missing_vars:
-                error_messages.append(f"Missing environment variables: {', '.join(missing_vars)}")
-            if empty_vars:
-                error_messages.append(f"Empty environment variables: {', '.join(empty_vars)}")
-            raise ValueError(". ".join(error_messages))
-        
-        # Retrieve validated values
-        REDOX_CLIENT_ID = os.environ.get("REDOX_CLIENT_ID")
-        REDOX_PRIVATE_KEY = os.environ.get("REDOX_PRIVATE_KEY")
-        REDOX_PUBLIC_KEY_ID = os.environ.get("REDOX_PUBLIC_KEY_ID")
-        OAUTH_PRIVATE_KEY = os.environ.get("OAUTH_PRIVATE_KEY")
-        OAUTH_CLIENT_ID = os.environ.get("OAUTH_CLIENT_ID")
-        OAUTH_KEY_ID = os.environ.get("OAUTH_KEY_ID")
-        
-        print(f"[redox-proxy] All required environment variables validated successfully", file=sys.stderr)
-        
-    except Exception as e:
-        print(f"[redox-proxy] ERROR initializing secrets: {e}", file=sys.stderr)
-        print(f"[redox-proxy] Traceback: {traceback.format_exc()}", file=sys.stderr)
-        raise
-
-print(f"[redox-proxy] Starting initialization...", file=sys.stderr)
-try:
-    initialize_secrets()
-    initialize_binary()
-    print(f"[redox-proxy] Initialization complete!", file=sys.stderr)
-except Exception as e:
-    print(f"[redox-proxy] FATAL: Initialization failed: {e}", file=sys.stderr)
-    raise
-
+# ============================================================================
+# Request/Response Models
+# ============================================================================
 class JsonRpcRequest(BaseModel):
     jsonrpc: str
     method: str
     id: Optional[int | str] = None
     params: Optional[Dict[str, Any]] = None
 
-print(f"[redox-proxy] Defining RedoxMCPProcess class...", file=sys.stderr)
+class HealthResponse(BaseModel):
+    status: str
+    mcp_process: str
+    message: Optional[str] = None
+    redox_api_endpoint: Optional[str] = None
+    uptime_seconds: Optional[float] = None
 
+class MetricsResponse(BaseModel):
+    process_alive: bool
+    process_pid: Optional[int] = None
+    pending_requests: int
+    total_requests: int
+    total_errors: int
+    uptime_seconds: float
+    restart_count: int
+
+# ============================================================================
+# Global Exception Handler
+# ============================================================================
+def handle_exception(exc_type, exc_value, exc_traceback):
+    """Global exception handler for uncaught exceptions"""
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    logger.error(
+        f"UNCAUGHT EXCEPTION: {exc_type.__name__}: {exc_value}"
+        , exc_info=(exc_type, exc_value, exc_traceback)
+    )
+
+sys.excepthook = handle_exception
+
+# ============================================================================
+# Binary Management
+# ============================================================================
+class BinaryManager:
+    """Manages MCP binary download and caching"""
+    
+    def __init__(self, workspace_client: WorkspaceClient, volume_path: str):
+        self.w = workspace_client
+        self.volume_path = volume_path
+        self.cache_dir = Path("/tmp/redox_mcp_cache")
+        self.cache_dir.mkdir(exist_ok=True)
+        self.binary_name = "redox-mcp-linux-x64"
+    
+    def get_cached_binary_path(self) -> Optional[str]:
+        """Check if binary exists in cache"""
+        cached_path = self.cache_dir / self.binary_name
+        if cached_path.exists() and os.access(cached_path, os.X_OK):
+            logger.info(f"Found cached binary at: {cached_path}")
+            return str(cached_path)
+        return None
+    
+    def download_and_cache_binary(self) -> str:
+        """Download binary from volume and cache it"""
+        cached_path = self.get_cached_binary_path()
+        if cached_path:
+            return cached_path
+        
+        volume_binary_path = f"{self.volume_path}/{self.binary_name}"
+        logger.info(f"Downloading binary from volume: {volume_binary_path}")
+        
+        try:
+            # Download to temporary file first
+            temp_binary = tempfile.NamedTemporaryFile(
+                mode='wb'
+                , delete=False
+                , suffix='-redox-mcp'
+                , dir=str(self.cache_dir)
+            )
+            temp_binary_path = temp_binary.name
+            
+            logger.info("Initiating download...")
+            response = self.w.files.download(volume_binary_path)
+            logger.info("Download complete, writing to temp file...")
+            temp_binary.write(response.contents.read())
+            temp_binary.close()
+            
+            # Set executable permissions
+            os.chmod(temp_binary_path, 0o755)
+            logger.info(f"Binary downloaded to: {temp_binary_path}")
+            
+            # Test the binary
+            self._test_binary(temp_binary_path)
+            
+            # Move to cache location
+            final_path = self.cache_dir / self.binary_name
+            Path(temp_binary_path).rename(final_path)
+            logger.info(f"Binary cached at: {final_path}")
+            
+            return str(final_path)
+            
+        except Exception as e:
+            logger.error(f"ERROR initializing binary: {e}", exc_info=True)
+            raise
+    
+    def _test_binary(self, binary_path: str) -> None:
+        """Test binary execution"""
+        logger.info("Testing binary execution...")
+        try:
+            test_result = subprocess.run(
+                [binary_path, "--version"]
+                , capture_output=True
+                , text=True
+                , timeout=5
+            )
+            logger.info(f"Binary test - return code: {test_result.returncode}")
+            logger.info(f"Binary test - stdout: {test_result.stdout}")
+            if test_result.stderr:
+                logger.info(f"Binary test - stderr: {test_result.stderr}")
+        except Exception as test_e:
+            logger.warning(f"Binary test failed: {test_e}")
+
+# ============================================================================
+# MCP Process Manager
+# ============================================================================
 class RedoxMCPProcess:
-    def __init__(self, cmd: Optional[List[str]] = None):
-        print(f"[redox-proxy] Initializing RedoxMCPProcess...", file=sys.stderr)
-        if cmd is None:
-            cmd = [REDOX_BINARY_PATH]
-        self._cmd: List[str] = [str(c) for c in cmd if c is not None]
+    """Manages the MCP subprocess with proper concurrency handling"""
+    
+    def __init__(self, binary_path: str, settings: Settings):
+        self.binary_path = binary_path
+        self.settings = settings
+        self._cmd: List[str] = [binary_path]
         self._proc: Optional[subprocess.Popen] = None
-        self._pending: dict[Any, asyncio.Future] = {}
+        self._pending: Dict[Any, asyncio.Future] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._tools_cache: Optional[List[Dict[str, Any]]] = None
-        print(f"[redox-proxy] RedoxMCPProcess initialized with command: {self._cmd}", file=sys.stderr)
-
+        self._request_lock = asyncio.Lock()  # Concurrency safety
+        self._start_time: Optional[float] = None
+        self._restart_count: int = 0
+        self._total_requests: int = 0
+        self._total_errors: int = 0
+        logger.info(f"RedoxMCPProcess initialized with command: {self._cmd}")
+    
     async def start(self) -> None:
-        if self._proc is not None:
-            print(f"[redox-proxy] MCP process already running, skipping start", file=sys.stderr)
+        """Start the MCP process"""
+        if self._proc is not None and self.is_alive():
+            logger.info("MCP process already running, skipping start")
             return
+        
         if self._loop is None:
             self._loop = asyncio.get_running_loop()
-            print(f"[redox-proxy] Event loop acquired", file=sys.stderr)
-        print(f"[redox-proxy] Starting MCP process with command: {self._cmd}", file=sys.stderr)
-        print(f"[redox-proxy] Environment variables being passed:", file=sys.stderr)
+            logger.info("Event loop acquired")
+        
+        logger.info(f"Starting MCP process with command: {self._cmd}")
         
         # Copy current environment
         env = os.environ.copy()
         
-        # Log all OAuth-related env vars that are set
+        # Log OAuth-related env vars (sanitized)
         oauth_vars = [k for k in env.keys() if 
                      'CLIENT' in k.upper() or 
                      'KEY' in k.upper() or 
@@ -172,46 +227,67 @@ class RedoxMCPProcess:
                      'REDOX' in k.upper()]
         for var in sorted(oauth_vars):
             value = env[var]
-            if 'PATH' in var:
-                print(f"[redox-proxy]   {var}: {value}", file=sys.stderr)
+            if 'PATH' in var or 'VOLUME' in var:
+                logger.info(f"  {var}: {value}")
             else:
-                print(f"[redox-proxy]   {var}: {value[:20]}... (length={len(value)})", file=sys.stderr)
+                logger.info(f"  {var}: {value[:20]}... (length={len(value)})")
         
         try:
             self._proc = subprocess.Popen(
-                self._cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=0,
-                env=env,
+                self._cmd
+                , stdin=subprocess.PIPE
+                , stdout=subprocess.PIPE
+                , stderr=subprocess.PIPE
+                , bufsize=0
+                , env=env
             )
-            print(f"[redox-proxy] MCP process started with PID: {self._proc.pid}", file=sys.stderr)
+            logger.info(f"MCP process started with PID: {self._proc.pid}")
+            self._start_time = time.time()
+            
+            # Wait and check if process started successfully
             await asyncio.sleep(0.5)
             if self._proc.poll() is not None:
                 exit_code = self._proc.returncode
                 stderr_output = self._proc.stderr.read().decode('utf-8') if self._proc.stderr else "No stderr"
                 stdout_output = self._proc.stdout.read().decode('utf-8') if self._proc.stdout else "No stdout"
-                print(f"[redox-proxy] ERROR: MCP process exited immediately with code {exit_code}", file=sys.stderr)
-                print(f"[redox-proxy] STDERR: {stderr_output}", file=sys.stderr)
-                print(f"[redox-proxy] STDOUT: {stdout_output}", file=sys.stderr)
+                logger.error(f"MCP process exited immediately with code {exit_code}")
+                logger.error(f"STDERR: {stderr_output}")
+                logger.error(f"STDOUT: {stdout_output}")
                 raise RuntimeError(f"MCP process failed to start (exit code {exit_code}): {stderr_output}")
+                
         except Exception as e:
-            print(f"[redox-proxy] ERROR starting subprocess: {e}", file=sys.stderr)
-            print(f"[redox-proxy] Traceback: {traceback.format_exc()}", file=sys.stderr)
+            logger.error(f"ERROR starting subprocess: {e}", exc_info=True)
             raise
+        
         if self._proc.stdin is None or self._proc.stdout is None:
             raise RuntimeError("Failed to open pipes to redox-mcp")
-        print(f"[redox-proxy] MCP process running, starting read loop...", file=sys.stderr)
+        
+        logger.info("MCP process running, starting read loops...")
         self._loop.create_task(self._read_loop())
         self._loop.create_task(self._stderr_loop())
-
+    
+    async def ensure_alive(self) -> None:
+        """Ensure process is alive, restart if necessary"""
+        if not self.is_alive():
+            if self._restart_count >= self.settings.max_restart_attempts:
+                logger.error(f"Max restart attempts ({self.settings.max_restart_attempts}) reached")
+                raise RuntimeError("MCP process repeatedly failing, max restart attempts exceeded")
+            
+            logger.warning(f"MCP process died, attempting restart (attempt {self._restart_count + 1})")
+            await self.stop()
+            await asyncio.sleep(self.settings.restart_delay)
+            await self.start()
+            self._restart_count += 1
+    
     async def _stderr_loop(self) -> None:
+        """Read stderr from MCP process"""
         if self._proc is None or self._proc.stderr is None:
             return
+        
         reader = asyncio.StreamReader()
         protocol = asyncio.StreamReaderProtocol(reader)
         await self._loop.connect_read_pipe(lambda: protocol, self._proc.stderr)
+        
         try:
             while True:
                 line = await reader.readline()
@@ -219,162 +295,290 @@ class RedoxMCPProcess:
                     break
                 line = line.decode("utf-8").strip()
                 if line:
-                    print(f"[redox-mcp STDERR] {line}", file=sys.stderr)
+                    logger.info(f"[MCP STDERR] {line}")
         except Exception as e:
-            print(f"[redox-proxy] Error in stderr loop: {e}", file=sys.stderr)
-
+            logger.error(f"Error in stderr loop: {e}", exc_info=True)
+    
     def _sanitize_json_response(self, msg: Dict[str, Any]) -> Dict[str, Any]:
+        """Sanitize JSON response to ensure it's serializable"""
         try:
-            sanitized = json.loads(json.dumps(msg))
-            return sanitized
+            return json.loads(json.dumps(msg))
         except Exception as e:
-            print(f"[redox-proxy] Warning: Failed to sanitize JSON: {e}", file=sys.stderr)
+            logger.warning(f"Failed to sanitize JSON: {e}")
             return msg
-
+    
     async def _read_loop(self) -> None:
+        """Read stdout from MCP process and route responses to pending futures"""
         assert self._proc is not None and self._proc.stdout is not None
+        
         reader = asyncio.StreamReader()
         protocol = asyncio.StreamReaderProtocol(reader)
         await self._loop.connect_read_pipe(lambda: protocol, self._proc.stdout)
+        
         try:
             while True:
                 line = await reader.readline()
                 if not line:
-                    print(f"[redox-proxy] Read loop: EOF reached", file=sys.stderr)
+                    logger.info("Read loop: EOF reached")
                     break
+                
                 line = line.decode("utf-8").strip()
                 if not line:
                     continue
-                print(f"[redox-proxy] Raw line from MCP: {repr(line[:200])}", file=sys.stderr)
+                
+                logger.debug(f"Raw line from MCP: {repr(line[:200])}")
+                
                 try:
                     msg = json.loads(line)
                     msg = self._sanitize_json_response(msg)
-                    print(f"[redox-proxy] Parsed JSON message: {json.dumps(msg)[:200]}...", file=sys.stderr)
+                    logger.debug(f"Parsed JSON message: {json.dumps(msg)[:200]}...")
                 except json.JSONDecodeError as je:
-                    print(f"[redox-proxy] JSON decode error: {je}", file=sys.stderr)
-                    print(f"[redox-proxy] Problematic line: {repr(line)}", file=sys.stderr)
+                    logger.error(f"JSON decode error: {je}")
+                    logger.error(f"Problematic line: {repr(line)}")
                     continue
+                
                 rpc_id = msg.get("id")
                 if rpc_id is not None and rpc_id in self._pending:
                     fut = self._pending.pop(rpc_id)
                     if not fut.done():
                         fut.set_result(msg)
                 else:
-                    print(f"[redox-proxy] Unmatched/notification message ID: {rpc_id}", file=sys.stderr)
+                    logger.debug(f"Unmatched/notification message ID: {rpc_id}")
+                    
         except Exception as e:
-            print(f"[redox-proxy] Error in read loop: {e}", file=sys.stderr)
-            print(f"[redox-proxy] Traceback: {traceback.format_exc()}", file=sys.stderr)
+            logger.error(f"Error in read loop: {e}", exc_info=True)
         finally:
-            print(f"[redox-proxy] Read loop terminated", file=sys.stderr)
+            logger.info("Read loop terminated")
             for fut in self._pending.values():
                 if not fut.done():
                     fut.set_exception(RuntimeError("redox-mcp process terminated"))
             self._pending.clear()
-
+    
     async def send(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Send request to MCP process with concurrency protection"""
+        # Ensure process is alive before sending
+        await self.ensure_alive()
+        
         assert self._proc is not None and self._proc.stdin is not None
-        rpc_id = request.get("id")
-        data = json.dumps(request) + "\n"
-        print(f"[redox-proxy] Sending COMPLETE request (not truncated):", file=sys.stderr)
-        print(json.dumps(request, indent=2), file=sys.stderr)
-        print(f"[redox-proxy] Request length: {len(data)} bytes", file=sys.stderr)
-        self._proc.stdin.write(data.encode("utf-8"))
-        self._proc.stdin.flush()
         
-        # Debug: Check if process is still alive after sending
-        print(f"[redox-proxy] Process status after send: {self._proc.poll()}", file=sys.stderr)
-        
-        if rpc_id is None:
-            return {}
-        fut: asyncio.Future = self._loop.create_future()
-        self._pending[rpc_id] = fut
-        try:
-            # Reduced timeout to 35s to stay under platform's 40s limit
-            resp = await asyncio.wait_for(fut, timeout=35.0)
-            print(f"[redox-proxy] Received response: {json.dumps(resp)[:200]}...", file=sys.stderr)
-            return resp
-        except asyncio.TimeoutError:
-            print(f"[redox-proxy] Timeout waiting for response to request ID: {rpc_id}", file=sys.stderr)
-            raise HTTPException(status_code=504, detail=f"Timeout waiting for MCP response (35s limit)")
-
+        # Use lock to serialize requests and prevent race conditions
+        async with self._request_lock:
+            self._total_requests += 1
+            rpc_id = request.get("id")
+            data = json.dumps(request) + "\n"
+            
+            logger.info(f"Sending request (method={request.get('method')}, id={rpc_id})")
+            logger.debug(f"Request: {json.dumps(request, indent=2)}")
+            logger.debug(f"Request length: {len(data)} bytes")
+            
+            try:
+                self._proc.stdin.write(data.encode("utf-8"))
+                self._proc.stdin.flush()
+            except Exception as e:
+                self._total_errors += 1
+                logger.error(f"Failed to send request: {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"Failed to send request to MCP: {str(e)}")
+            
+            # Check if process is still alive after sending
+            if not self.is_alive():
+                self._total_errors += 1
+                logger.error("Process died after sending request")
+                raise HTTPException(status_code=500, detail="MCP process died")
+            
+            if rpc_id is None:
+                return {}
+            
+            fut: asyncio.Future = self._loop.create_future()
+            self._pending[rpc_id] = fut
+            
+            try:
+                resp = await asyncio.wait_for(fut, timeout=self.settings.request_timeout)
+                logger.info(f"Received response for request ID: {rpc_id}")
+                logger.debug(f"Response: {json.dumps(resp)[:200]}...")
+                return resp
+            except asyncio.TimeoutError:
+                self._total_errors += 1
+                self._pending.pop(rpc_id, None)
+                logger.error(f"Timeout waiting for response to request ID: {rpc_id}")
+                raise HTTPException(
+                    status_code=504
+                    , detail=f"Timeout waiting for MCP response ({self.settings.request_timeout}s limit)"
+                )
+            except Exception as e:
+                self._total_errors += 1
+                self._pending.pop(rpc_id, None)
+                logger.error(f"Error waiting for response: {e}", exc_info=True)
+                raise
+    
     def is_alive(self) -> bool:
         """Check if the MCP process is running"""
         return self._proc is not None and self._proc.poll() is None
-
+    
+    def get_uptime(self) -> float:
+        """Get process uptime in seconds"""
+        if self._start_time is None:
+            return 0.0
+        return time.time() - self._start_time
+    
+    def get_metrics(self) -> MetricsResponse:
+        """Get process metrics"""
+        return MetricsResponse(
+            process_alive=self.is_alive()
+            , process_pid=self._proc.pid if self._proc else None
+            , pending_requests=len(self._pending)
+            , total_requests=self._total_requests
+            , total_errors=self._total_errors
+            , uptime_seconds=self.get_uptime()
+            , restart_count=self._restart_count
+        )
+    
     async def list_tools(self) -> List[Dict[str, Any]]:
         """Query the MCP server for available tools"""
         if self._tools_cache is not None:
+            logger.info("Returning cached tools list")
             return self._tools_cache
         
+        logger.info("Fetching tools list from MCP server")
         response = await self.send({
-            "jsonrpc": "2.0",
-            "method": "tools/list",
-            "id": "list_tools_req",
-            "params": {}
+            "jsonrpc": "2.0"
+            , "method": "tools/list"
+            , "id": "list_tools_req"
+            , "params": {}
         })
         
         if "error" in response:
-            print(f"[redox-proxy] Error listing tools: {response['error']}", file=sys.stderr)
+            logger.error(f"Error listing tools: {response['error']}")
             raise HTTPException(status_code=500, detail=f"MCP error: {response['error']}")
         
         tools = response.get("result", {}).get("tools", [])
         self._tools_cache = tools
+        logger.info(f"Retrieved {len(tools)} tools from MCP server")
         return tools
-
+    
     async def stop(self) -> None:
+        """Stop the MCP process gracefully"""
         if self._proc is None:
             return
+        
         try:
-            print(f"[redox-proxy] Stopping MCP process...", file=sys.stderr)
-            self._proc.send_signal(signal.SIGTERM)
+            logger.info("Stopping MCP process...")
+            if self.is_alive():
+                self._proc.send_signal(signal.SIGTERM)
+                # Wait for graceful shutdown
+                try:
+                    self._proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    logger.warning("Process didn't stop gracefully, killing...")
+                    self._proc.kill()
         except Exception as e:
-            print(f"[redox-proxy] Error stopping process: {e}", file=sys.stderr)
-        self._proc = None
+            logger.error(f"Error stopping process: {e}", exc_info=True)
+        finally:
+            self._proc = None
+            logger.info("MCP process stopped")
 
-print(f"[redox-proxy] Creating RedoxMCPProcess instance...", file=sys.stderr)
+# ============================================================================
+# Application Initialization
+# ============================================================================
+logger.info("Starting application initialization...")
+
+# Load settings
 try:
-    redox_proc = RedoxMCPProcess()
-    print(f"[redox-proxy] RedoxMCPProcess instance created successfully", file=sys.stderr)
+    settings = Settings()
+    logger.info("Configuration loaded successfully")
+    logger.info(f"Request timeout: {settings.request_timeout}s")
+    logger.info(f"Max restart attempts: {settings.max_restart_attempts}")
 except Exception as e:
-    print(f"[redox-proxy] ERROR creating RedoxMCPProcess: {e}", file=sys.stderr)
-    print(f"[redox-proxy] Traceback: {traceback.format_exc()}", file=sys.stderr)
+    logger.error(f"FATAL: Failed to load configuration: {e}", exc_info=True)
     raise
 
-print(f"[redox-proxy] Defining lifespan context manager...", file=sys.stderr)
+# Initialize workspace client and binary manager
+w = WorkspaceClient()
+binary_manager = BinaryManager(w, settings.redox_binary_volume)
 
+# Download and cache binary
+try:
+    binary_path = binary_manager.download_and_cache_binary()
+    logger.info(f"Binary ready at: {binary_path}")
+except Exception as e:
+    logger.error(f"FATAL: Binary initialization failed: {e}", exc_info=True)
+    raise
+
+# Create MCP process instance
+try:
+    redox_proc = RedoxMCPProcess(binary_path, settings)
+    logger.info("RedoxMCPProcess instance created successfully")
+except Exception as e:
+    logger.error(f"FATAL: Failed to create RedoxMCPProcess: {e}", exc_info=True)
+    raise
+
+# ============================================================================
+# FastAPI Application Setup
+# ============================================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print(f"[redox-proxy] FastAPI lifespan startup BEGIN", file=sys.stderr)
-    sys.stderr.flush()
+    """Application lifespan manager"""
+    logger.info("FastAPI lifespan startup BEGIN")
     try:
-        print(f"[redox-proxy] About to call redox_proc.start()...", file=sys.stderr)
-        sys.stderr.flush()
         await redox_proc.start()
-        print(f"[redox-proxy] Redox MCP process started successfully", file=sys.stderr)
-        sys.stderr.flush()
+        logger.info("Redox MCP process started successfully")
     except Exception as e:
-        print(f"[redox-proxy] ERROR starting redox process: {e}", file=sys.stderr)
-        print(f"[redox-proxy] Traceback: {traceback.format_exc()}", file=sys.stderr)
-        sys.stderr.flush()
+        logger.error(f"ERROR starting redox process: {e}", exc_info=True)
         raise
-    print(f"[redox-proxy] Lifespan startup complete, yielding...", file=sys.stderr)
-    sys.stderr.flush()
+    
+    logger.info("Lifespan startup complete, yielding...")
     yield
-    print(f"[redox-proxy] FastAPI lifespan shutdown BEGIN", file=sys.stderr)
-    sys.stderr.flush()
+    
+    logger.info("FastAPI lifespan shutdown BEGIN")
     await redox_proc.stop()
-    print(f"[redox-proxy] FastAPI lifespan shutdown COMPLETE", file=sys.stderr)
-    sys.stderr.flush()
+    logger.info("FastAPI lifespan shutdown COMPLETE")
 
-print(f"[redox-proxy] Creating FastAPI app...", file=sys.stderr)
-try:
-    app = FastAPI(lifespan=lifespan)
-    print(f"[redox-proxy] FastAPI app created successfully", file=sys.stderr)
-except Exception as e:
-    print(f"[redox-proxy] ERROR creating FastAPI app: {e}", file=sys.stderr)
-    print(f"[redox-proxy] Traceback: {traceback.format_exc()}", file=sys.stderr)
-    raise
+# Create FastAPI app
+app = FastAPI(
+    title="Redox MCP HTTP Proxy"
+    , description="HTTP proxy for Redox MCP stdio server"
+    , version="1.0.0"
+    , lifespan=lifespan
+)
 
+# Add CORS middleware for Databricks Apps
+app.add_middleware(
+    CORSMiddleware
+    , allow_origins=["*"]  # Configure based on your security requirements
+    , allow_credentials=True
+    , allow_methods=["*"]
+    , allow_headers=["*"]
+)
+
+# ============================================================================
+# Exception Handlers
+# ============================================================================
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTP exceptions with structured error response"""
+    return JSONResponse(
+        status_code=exc.status_code
+        , content=ErrorResponse(
+            error_code=f"HTTP_{exc.status_code}"
+            , message=exc.detail
+        ).model_dump()
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handle unexpected exceptions"""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500
+        , content=ErrorResponse(
+            error_code="INTERNAL_ERROR"
+            , message="An unexpected error occurred"
+            , details={"error": str(exc)}
+        ).model_dump()
+    )
+
+# ============================================================================
+# API Endpoints
+# ============================================================================
 @app.get("/")
 async def root():
     """Root endpoint with basic info"""
@@ -382,35 +586,42 @@ async def root():
         "service": "Redox MCP HTTP Proxy"
         , "status": "running"
         , "mcp_process_alive": redox_proc.is_alive()
+        , "uptime_seconds": redox_proc.get_uptime()
         , "endpoints": {
             "health": "/api/v1/health"
+            , "metrics": "/api/v1/metrics"
             , "tools": "/api/v1/tools"
             , "debug_env": "/api/v1/debug/env"
             , "mcp": "/mcp"
         }
     }
 
-@app.get("/api/v1/health")
+@app.get("/api/v1/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint for monitoring"""
     is_alive = redox_proc.is_alive()
     
     if not is_alive:
-        return Response(
-            content=json.dumps({
-                "status": "unhealthy"
-                , "mcp_process": "stopped"
-                , "message": "MCP process is not running"
-            })
-            , status_code=503
-            , media_type="application/json"
+        return JSONResponse(
+            status_code=503
+            , content=HealthResponse(
+                status="unhealthy"
+                , mcp_process="stopped"
+                , message="MCP process is not running"
+            ).model_dump()
         )
     
-    return {
-        "status": "healthy"
-        , "mcp_process": "running"
-        , "redox_api_endpoint": "https://api.redoxengine.com/"
-    }
+    return HealthResponse(
+        status="healthy"
+        , mcp_process="running"
+        , redox_api_endpoint="https://api.redoxengine.com/"
+        , uptime_seconds=redox_proc.get_uptime()
+    )
+
+@app.get("/api/v1/metrics", response_model=MetricsResponse)
+async def metrics():
+    """Metrics endpoint for observability"""
+    return redox_proc.get_metrics()
 
 @app.get("/api/v1/debug/env")
 async def debug_env():
@@ -424,7 +635,7 @@ async def debug_env():
     # Sanitize sensitive values
     sanitized = {}
     for k, v in oauth_vars.items():
-        if 'PATH' in k:
+        if 'PATH' in k or 'VOLUME' in k:
             sanitized[k] = v  # Show paths in full
         else:
             sanitized[k] = f"{v[:10]}...{v[-10:]} (length={len(v)})"  # Show partial for secrets
@@ -439,64 +650,76 @@ async def debug_env():
 async def list_tools():
     """List all available tools from the MCP server"""
     try:
-        await redox_proc.start()
+        await redox_proc.ensure_alive()
         tools = await redox_proc.list_tools()
         return {
             "tools": tools
             , "count": len(tools)
             , "redox_api_connected": True
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"[redox-proxy] Error listing tools: {e}", file=sys.stderr)
-        print(f"[redox-proxy] Traceback: {traceback.format_exc()}", file=sys.stderr)
+        logger.error(f"Error listing tools: {e}", exc_info=True)
         raise HTTPException(
             status_code=500
             , detail=f"Failed to list tools. This may indicate authentication issues with Redox API: {str(e)}"
         )
 
 @app.post("/mcp")
-async def mcp_endpoint(req: JsonRpcRequest) -> Dict[str, Any]:
-    print(f"[redox-proxy] MCP endpoint called with method: {req.method}", file=sys.stderr)
-    await redox_proc.start()
+async def mcp_endpoint(req: JsonRpcRequest, request: Request) -> Dict[str, Any]:
+    """Main MCP endpoint for JSON-RPC requests"""
+    logger.info(f"MCP endpoint called with method: {req.method}")
+    
+    # Check if client disconnected
+    if await request.is_disconnected():
+        logger.warning("Client disconnected before processing request")
+        raise HTTPException(status_code=499, detail="Client disconnected")
+    
     request_dict = req.model_dump(exclude_none=True)
+    
     try:
         resp = await redox_proc.send(request_dict)
-        print(f"[redox-proxy] Returning response: {json.dumps(resp)[:200]}...", file=sys.stderr)
+        logger.info(f"Returning response for method: {req.method}")
         
-        # Check for errors in the response and provide better debugging
+        # Check for errors in the response
         if "error" in resp:
             error_detail = resp["error"]
-            print(f"[redox-proxy] MCP returned error: {error_detail}", file=sys.stderr)
+            logger.error(f"MCP returned error: {error_detail}")
             
             # Check if it's an authentication error
             error_message = error_detail.get("message", "")
             if "auth" in error_message.lower() or "unauthorized" in error_message.lower():
-                print(f"[redox-proxy] AUTHENTICATION ERROR detected with Redox API", file=sys.stderr)
+                logger.error("AUTHENTICATION ERROR detected with Redox API")
         
         return resp
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"[redox-proxy] Error in mcp_endpoint: {e}", file=sys.stderr)
-        print(f"[redox-proxy] Traceback: {traceback.format_exc()}", file=sys.stderr)
+        logger.error(f"Error in mcp_endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-print(f"[redox-proxy] Module initialization complete, ready to serve!", file=sys.stderr)
-sys.stderr.flush()
+# ============================================================================
+# Main Entry Point
+# ============================================================================
+logger.info("Module initialization complete, ready to serve!")
 
 def main() -> None:
-    print(f"[redox-proxy] main() function called, starting uvicorn...", file=sys.stderr)
-    sys.stderr.flush()
+    """Main entry point for running the application"""
+    logger.info("main() function called, starting uvicorn...")
     try:
         import uvicorn
-        print(f"[redox-proxy] Uvicorn imported, calling run()...", file=sys.stderr)
-        sys.stderr.flush()
-        uvicorn.run(app, host="0.0.0.0", port=8000, log_level="debug")
+        uvicorn.run(
+            app
+            , host="0.0.0.0"
+            , port=8000
+            , log_level="info"
+            , access_log=True
+        )
     except Exception as e:
-        print(f"[redox-proxy] ERROR in main(): {e}", file=sys.stderr)
-        print(f"[redox-proxy] Traceback: {traceback.format_exc()}", file=sys.stderr)
-        sys.stderr.flush()
+        logger.error(f"ERROR in main(): {e}", exc_info=True)
         raise
 
 if __name__ == "__main__":
-    print(f"[redox-proxy] Running as __main__", file=sys.stderr)
-    sys.stderr.flush()
+    logger.info("Running as __main__")
     main()
