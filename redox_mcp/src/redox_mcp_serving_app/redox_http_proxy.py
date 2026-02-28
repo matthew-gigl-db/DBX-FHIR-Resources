@@ -79,9 +79,8 @@ def initialize_secrets():
         KID = w.secrets.get_secret(scope=SECRET_SCOPE_NAME, key="kid").value
         print(f"[redox-proxy] Retrieving client ID...", file=sys.stderr)
         CLIENT_ID = w.secrets.get_secret(scope=SECRET_SCOPE_NAME, key="client_id").value
-        os.environ["OAUTH_CLIENT_ID"] = CLIENT_ID
-        os.environ["OAUTH_KEY_ID"] = KID
-        print(f"[redox-proxy] Secrets retrieved and environment variables set", file=sys.stderr)
+        
+        # Write private key to temp file first
         print(f"[redox-proxy] Writing private key to temp file...", file=sys.stderr)
         temp_key_file = tempfile.NamedTemporaryFile(
             mode='w'
@@ -91,8 +90,36 @@ def initialize_secrets():
         temp_key_file.write(PRIVATE_KEY)
         temp_key_file.close()
         os.chmod(temp_key_file.name, 0o600)
+        
+        # Set ALL possible environment variable name variants that Redox MCP might expect
+        # Standard OAuth names (no prefix)
+        os.environ["CLIENT_ID"] = CLIENT_ID
+        os.environ["KEY_ID"] = KID
+        os.environ["PRIVATE_KEY_PATH"] = temp_key_file.name
+        os.environ["KEY_PATH"] = temp_key_file.name
+        
+        # OAUTH_ prefixed names (original)
+        os.environ["OAUTH_CLIENT_ID"] = CLIENT_ID
+        os.environ["OAUTH_KEY_ID"] = KID
         os.environ["OAUTH_KEY_PATH"] = temp_key_file.name
+        
+        # REDOX_ prefixed names
+        os.environ["REDOX_CLIENT_ID"] = CLIENT_ID
+        os.environ["REDOX_KEY_ID"] = KID
+        os.environ["REDOX_PRIVATE_KEY_PATH"] = temp_key_file.name
+        
+        # Also try uppercase variants
+        os.environ["CLIENTID"] = CLIENT_ID
+        os.environ["KEYID"] = KID
+        
+        print(f"[redox-proxy] Secrets retrieved and environment variables set", file=sys.stderr)
         print(f"[redox-proxy] Private key written to: {temp_key_file.name}", file=sys.stderr)
+        print(f"[redox-proxy] Set environment variables:", file=sys.stderr)
+        print(f"[redox-proxy]   CLIENT_ID (length): {len(CLIENT_ID)}", file=sys.stderr)
+        print(f"[redox-proxy]   KEY_ID (length): {len(KID)}", file=sys.stderr)
+        print(f"[redox-proxy]   Key file path: {temp_key_file.name}", file=sys.stderr)
+        print(f"[redox-proxy]   Key file exists: {os.path.exists(temp_key_file.name)}", file=sys.stderr)
+        
     except Exception as e:
         print(f"[redox-proxy] ERROR initializing secrets: {e}", file=sys.stderr)
         print(f"[redox-proxy] Traceback: {traceback.format_exc()}", file=sys.stderr)
@@ -135,21 +162,25 @@ class RedoxMCPProcess:
             self._loop = asyncio.get_running_loop()
             print(f"[redox-proxy] Event loop acquired", file=sys.stderr)
         print(f"[redox-proxy] Starting MCP process with command: {self._cmd}", file=sys.stderr)
-        print(f"[redox-proxy] Environment variables:", file=sys.stderr)
-        print(f"[redox-proxy]   OAUTH_CLIENT_ID: {os.environ.get('OAUTH_CLIENT_ID', 'NOT SET')[:20]}...", file=sys.stderr)
-        print(f"[redox-proxy]   OAUTH_KEY_ID: {os.environ.get('OAUTH_KEY_ID', 'NOT SET')[:20]}...", file=sys.stderr)
-        print(f"[redox-proxy]   OAUTH_KEY_PATH: {os.environ.get('OAUTH_KEY_PATH', 'NOT SET')}", file=sys.stderr)
+        print(f"[redox-proxy] Environment variables being passed:", file=sys.stderr)
+        
+        # Copy current environment
+        env = os.environ.copy()
+        
+        # Log all OAuth-related env vars that are set
+        oauth_vars = [k for k in env.keys() if 
+                     'CLIENT' in k.upper() or 
+                     'KEY' in k.upper() or 
+                     'OAUTH' in k.upper() or 
+                     'REDOX' in k.upper()]
+        for var in sorted(oauth_vars):
+            value = env[var]
+            if 'PATH' in var:
+                print(f"[redox-proxy]   {var}: {value}", file=sys.stderr)
+            else:
+                print(f"[redox-proxy]   {var}: {value[:20]}... (length={len(value)})", file=sys.stderr)
+        
         try:
-            # Copy current environment and pass it to subprocess
-            env = os.environ.copy()
-            
-            # Debug: Verify critical env vars are present
-            print(f"[redox-proxy] Subprocess env has OAUTH_CLIENT_ID: {'OAUTH_CLIENT_ID' in env}", file=sys.stderr)
-            print(f"[redox-proxy] Subprocess env has OAUTH_KEY_ID: {'OAUTH_KEY_ID' in env}", file=sys.stderr)
-            print(f"[redox-proxy] Subprocess env has OAUTH_KEY_PATH: {'OAUTH_KEY_PATH' in env}", file=sys.stderr)
-            if 'OAUTH_KEY_PATH' in env:
-                print(f"[redox-proxy] Key file exists: {os.path.exists(env['OAUTH_KEY_PATH'])}", file=sys.stderr)
-            
             self._proc = subprocess.Popen(
                 self._cmd,
                 stdin=subprocess.PIPE,
@@ -356,6 +387,7 @@ async def root():
         , "endpoints": {
             "health": "/health"
             , "tools": "/tools"
+            , "debug_env": "/debug/env"
             , "mcp": "/mcp"
         }
     }
@@ -380,6 +412,29 @@ async def health_check():
         "status": "healthy"
         , "mcp_process": "running"
         , "redox_api_endpoint": "https://api.redoxengine.com/"
+    }
+
+@app.get("/debug/env")
+async def debug_env():
+    """Debug endpoint to show OAuth-related environment variables"""
+    oauth_vars = {k: v for k, v in os.environ.items() if 
+                  'CLIENT' in k.upper() or 
+                  'KEY' in k.upper() or 
+                  'OAUTH' in k.upper() or 
+                  'REDOX' in k.upper()}
+    
+    # Sanitize sensitive values
+    sanitized = {}
+    for k, v in oauth_vars.items():
+        if 'PATH' in k:
+            sanitized[k] = v  # Show paths in full
+        else:
+            sanitized[k] = f"{v[:10]}...{v[-10:]} (length={len(v)})"  # Show partial for secrets
+    
+    return {
+        "environment_variables": sanitized
+        , "count": len(oauth_vars)
+        , "note": "Sensitive values are partially masked"
     }
 
 @app.get("/tools")
