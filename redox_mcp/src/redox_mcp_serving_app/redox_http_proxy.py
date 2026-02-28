@@ -14,6 +14,8 @@ from databricks.sdk import WorkspaceClient
 from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel
 
+print(f"[redox-proxy] ALL ENV VARS: {list(os.environ.keys())}", file=sys.stderr)
+
 def handle_exception(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
@@ -122,8 +124,8 @@ def initialize_secrets():
 
 print(f"[redox-proxy] Starting initialization...", file=sys.stderr)
 try:
-    initialize_binary()
     initialize_secrets()
+    initialize_binary()
     print(f"[redox-proxy] Initialization complete!", file=sys.stderr)
 except Exception as e:
     print(f"[redox-proxy] FATAL: Initialization failed: {e}", file=sys.stderr)
