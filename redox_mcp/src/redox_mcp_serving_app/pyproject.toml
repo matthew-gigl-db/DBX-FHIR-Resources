@@ -5,6 +5,7 @@ dependencies = [
   "fastapi",
   "uvicorn",
   "jwcrypto",
+  "pydantic-settings",
 ]
 
 [project.scripts]
