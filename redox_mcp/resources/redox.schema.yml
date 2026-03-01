@@ -1,0 +1,14 @@
+resources:
+  schemas:
+    redox_schema:
+      name: ${var.schema}
+      grants:
+        - principal: ${var.run_as_user}
+          privileges:
+            - MANAGE
+            - ALL_PRIVILEGES
+        - principal: matthew.giglia@databricks.com
+          privileges:
+            - MANAGE
+            - ALL_PRIVILEGES
+      catalog_name: ${var.catalog}

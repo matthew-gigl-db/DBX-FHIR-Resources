@@ -135,14 +135,14 @@ targets:
       root_path: /Workspace/epic-on-fhir/.bundle/${bundle.name}/${bundle.target}
     resources:
       # only uncomment the secret below iff this host target is unique, or is a fresh deployment
-      # secret_scopes:
-      #   epic_on_fhir_secret_scope:
-      #     name: ${var.secret_scope_name}
-      #     permissions:
-      #     - service_principal_name: ${var.run_as_user}
-      #       level: MANAGE
-      #     lifecycle:
-      #       prevent_destroy: true
+      secret_scopes:
+        epic_on_fhir_secret_scope:
+          name: ${var.secret_scope_name}
+          permissions:
+          - service_principal_name: ${var.run_as_user}
+            level: MANAGE
+          lifecycle:
+            prevent_destroy: true
       experiments:
         epic_on_fhir_requests_experiment:
           name: /Workspace/experiments/epic_on_fhir_requests
@@ -167,7 +167,7 @@ targets:
       client_id_dbs_key: client_id
       model_deployment_version: "1"
     permissions:
-      - user_name: matthewgiglia@mac.com
+      - user_name: matthew.giglia@databricks.com
         level: CAN_MANAGE
 
 # use only with real production Epic On FHIR Endpoints, Otherwise Use sandbox_prod target
@@ -183,5 +183,5 @@ targets:
       client_id_dbs_key: client_id_prod
       model_deployment_version: "1"
     permissions:
-      - user_name: matthewgiglia@mac.com
+      - user_name: matthew.giglia@databricks.com
         level: CAN_MANAGE

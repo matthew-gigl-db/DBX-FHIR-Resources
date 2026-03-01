@@ -1,0 +1,39 @@
+resources:
+  apps:
+    redox_mcp_serving_app:
+      name: "mcp-redox"
+      source_code_path: ../src/redox_mcp_serving_app/
+      description: "An application to serve the Redox MCP Server on Databricks"
+      lifecycle:
+        prevent_destroy: false
+      resources:
+        - name: redox_public_key
+          description: "Redox Authentication Public Key"
+          secret: 
+            scope: ${var.secret_scope_name}
+            key: public_key
+            permission: "READ"
+        - name: redox_kid
+          description: "Redox Authentication KID"
+          secret: 
+            scope: ${var.secret_scope_name}
+            key: kid
+            permission: "READ"
+        - name: redox_private_key
+          description: "Redox Authentication Private Key"
+          secret: 
+            scope: ${var.secret_scope_name}
+            key: private_key
+            permission: "READ"
+        - name: redox_client_id
+          description: "Redox Authentication Client ID"
+          secret: 
+            scope: ${var.secret_scope_name}
+            key: ${var.client_id_dbs_key}
+            permission: "READ"
+        - name: bin_volume
+          description: "Volume containing the Redox MCP Linux x86-64 binary"
+          uc_securable: 
+            securable_type: VOLUME
+            securable_full_name: ${resources.volumes.source_bin.catalog_name}.${resources.volumes.source_bin.schema_name}.${resources.volumes.source_bin.name}
+            permission: READ_VOLUME

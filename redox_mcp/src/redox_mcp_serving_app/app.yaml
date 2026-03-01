@@ -1,0 +1,32 @@
+command: [
+  "uvicorn"
+  ,"redox_http_proxy:app"
+  ,"--host"
+  ,"0.0.0.0"
+  ,"--port"
+  ,"8000"
+  ,"--log-level"
+  ,"debug"
+]
+env: 
+
+  - name: REDOX_BINARY_VOLUME
+    valueFrom: bin_volume
+
+  - name: OAUTH_PRIVATE_KEY
+    valueFrom: redox_private_key
+
+  - name: OAUTH_CLIENT_ID
+    valueFrom: redox_client_id
+
+  - name: OAUTH_KEY_ID
+    valueFrom: redox_kid
+
+  - name: REDOX_PRIVATE_KEY
+    valueFrom: redox_private_key
+
+  - name: REDOX_CLIENT_ID
+    valueFrom: redox_client_id
+
+  - name: REDOX_PUBLIC_KEY_ID
+    valueFrom: redox_kid

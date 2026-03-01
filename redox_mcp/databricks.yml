@@ -3,25 +3,141 @@ bundle:
   name: "redox_mcp"
 
 include:
-  - resources/*.yml
+  - resources/*.volume.yml
+  - resources/*.schema.yml
+  - resources/*.secret_scope.yml
+  - resources/*.app.yml
   - resources/*/*.yml
+
+# app deployment command: databricks apps deploy mcp-redox --source-code-path /Workspace/.bundle/redox_mcp/prod/files/src/redox_mcp_serving_app
+
+# Variable declarations. These variables are assigned in the dev/prod targets below.
+variables:
+  catalog:
+    description: The catalog to use
+  schema:
+    description: The schema to use
+  secret_scope_name: 
+    description: The secret scope name to use 
+    default: redox_oauth_keys
+  client_id_dbs_key:
+    description: The name of the key for the client id 
+    default: client_id
+  algo:
+    description: Encryption algorithm used. 
+    default: RS384
+  token_url:
+    description: OAuth2 Token URL
+    default: 'https://api.redoxengine.com/fhir/R4/redox-fhir-sandbox/Development/'
+  run_as_user:
+    description: The User that the workflows should run as.
+  higher_level_service_principal:
+    description: The service principal name (application ID) for higher level deployments.  Comment this out if you are not using a service_principal for deployments above the dev target.
+    default: 47c0365e-b1af-429c-b56d-07cfb18b5dc7
+  serverless_environment_version:
+    description: The serverless environment for which to run the workflows, notebook tasks, etc. 
+    default: 4
+  dashboard_embed_credentials:
+    description: Set to true if the dashboard should use the owner's credentials, or false if the user's credentials should be used to run the dashboard and access Unity Catalog assets.  
+    default: false
+  tags_project: 
+    default: Open Epic Smart on FHIR
+    description: Project tag to use for deployed resources.  
+  tags_businessUnit:
+    default: Healthcare and Life Sciences
+    description: Business Unit tag to use for deployed resource cost and ROI allocation. 
+  tags_developer:
+    default: matthew.giglia@databricks.com
+    description: Primary developer for Ops contact. 
+  tags_requestedBy:
+    default: Healthcare Providers and Health Plans
+    description: Tag for the primary business unit stakeholder(s).  
+  tags_RemoveAfter:
+    default: 2027-02-25
+    description: Required Databricks demo environment tag for long lived demos.  Can not be set more than one year after the deployment date. 
 
 targets:
   # The 'dev' target, for development purposes. This target is the default.
   dev:
     mode: development
     default: true
+    presets:
+      source_linked_deployment: false
+      tags:
+        project: ${var.tags_project}
+        businessUnit: ${var.tags_businessUnit}
+        requestedBy: ${var.tags_requestedBy}
+        developer: ${var.tags_developer}
+        RemoveAfter: ${var.tags_RemoveAfter}
+        env: ${bundle.target}
     workspace:
       host: https://fe-vm-mkgs-databricks-demos.cloud.databricks.com
+      root_path: /Workspace/Users/${var.run_as_user}/.bundle/${bundle.name}/${bundle.target}
+    # resources:
+    #   secret_scopes:
+    #     redox_secret_scope:
+    #       name: ${var.secret_scope_name}
+    #       permissions:
+    #       - user_name: ${var.run_as_user}
+    #         level: MANAGE
+    #       lifecycle:
+    #         prevent_destroy: true
+    variables:
+      catalog: mkgs_dev
+      schema: redox
+      run_as_user: matthew.giglia@databricks.com
+      client_id_dbs_key: client_id
+      token_url: 'https://api.redoxengine.com/fhir/R4/redox-fhir-sandbox/Development/'
+
+  free_edition:
+    mode: production
+    presets:
+      source_linked_deployment: false
+      tags:
+        project: ${var.tags_project}
+        businessUnit: ${var.tags_businessUnit}
+        requestedBy: ${var.tags_requestedBy}
+        developer: ${var.tags_developer}
+        RemoveAfter: ${var.tags_RemoveAfter}
+        env: ${bundle.target}
+    workspace:
+      host: https://dbc-e5684c0a-20fa.cloud.databricks.com/
+      root_path: /Workspace/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: mkgs
+      schema: redox
+      higher_level_service_principal: 0ab13318-f064-41b4-a49a-0fd18ceb2d0f
+      run_as_user: ${var.higher_level_service_principal}
+      client_id_dbs_key: client_id
+      token_url: 'https://api.redoxengine.com/fhir/R4/redox-fhir-sandbox/Staging/'
+    permissions:
+      - user_name: matthew.giglia@databricks.com
+        level: CAN_MANAGE
 
   # The 'prod' target, used for production deployment.
   prod:
     mode: production
+    presets:
+      source_linked_deployment: false
+      tags:
+        project: ${var.tags_project}
+        businessUnit: ${var.tags_businessUnit}
+        requestedBy: ${var.tags_requestedBy}
+        developer: ${var.tags_developer}
+        RemoveAfter: ${var.tags_RemoveAfter}
+        env: ${bundle.target}
     workspace:
       host: https://fe-vm-mkgs-databricks-demos.cloud.databricks.com
-      # We always use /Users/matthew.giglia@databricks.com for all resources to make sure we only have a single copy.
-      root_path: /Users/matthew.giglia@databricks.com/.bundle/${bundle.name}/${bundle.target}
-    run_as:
-      # This runs as matthew.giglia@databricks.com in production. We could also use a service principal here,
-      # see https://docs.databricks.com/dev-tools/bundles/permissions.html.
-      user_name: matthew.giglia@databricks.com
+      root_path: /Workspace/.bundle/${bundle.name}/${bundle.target}
+    # run_as:
+    #   user_name: ${var.run_as_user}
+    variables:
+      catalog: mkgs
+      schema: redox
+      higher_level_service_principal: 47c0365e-b1af-429c-b56d-07cfb18b5dc7
+      run_as_user: ${var.higher_level_service_principal}
+      client_id_dbs_key: client_id
+      token_url: 'https://api.redoxengine.com/fhir/R4/redox-fhir-sandbox/Staging/'
+    permissions:
+      - user_name: matthew.giglia@databricks.com
+        level: CAN_MANAGE
