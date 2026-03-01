@@ -233,10 +233,8 @@ class RedoxMCPProcess:
                      'REDOX' in k.upper()]
         for var in sorted(oauth_vars):
             value = env[var]
-            if 'PATH' in var or 'VOLUME' in var:
-                logger.info(f"  {var}: {value}")
-            else:
-                logger.info(f"  {var}: {value[:20]}... (length={len(value)})")
+            # Do not log secret values; only log that the variable is set and its length
+            logger.info(f"  {var}: [value redacted] (length={len(value)})")
         
         try:
             self._proc = subprocess.Popen(
