@@ -312,7 +312,8 @@ class RedoxMCPProcess:
         if self._proc is None or self._proc.stderr is None:
             return
         
-        reader = asyncio.StreamReader()
+        # Increase buffer limit to 10MB to handle large error messages
+        reader = asyncio.StreamReader(limit=10 * 1024 * 1024)
         protocol = asyncio.StreamReaderProtocol(reader)
         
         try:
@@ -353,7 +354,9 @@ class RedoxMCPProcess:
             logger.error("Cannot start read loop: process or stdout is None")
             return
         
-        reader = asyncio.StreamReader()
+        # Increase buffer limit to 10MB to handle large responses (default is 64KB)
+        # This is necessary for large tool lists from MCP servers like Redox
+        reader = asyncio.StreamReader(limit=10 * 1024 * 1024)
         protocol = asyncio.StreamReaderProtocol(reader)
         
         try:
@@ -394,6 +397,14 @@ class RedoxMCPProcess:
                 except asyncio.TimeoutError:
                     # Timeout is expected, continue to check shutdown event
                     continue
+                except asyncio.LimitOverrunError as e:
+                    logger.error(
+                        f"Buffer overflow: MCP response exceeded buffer limit. "
+                        f"Current limit: {reader._limit} bytes. "
+                        f"This usually means the MCP server sent a very large response. "
+                        f"Error: {e}"
+                    )
+                    break
                 except Exception as e:
                     if not self._shutdown_event.is_set():
                         logger.error(f"Error reading from stdout: {e}", exc_info=True)
@@ -402,11 +413,27 @@ class RedoxMCPProcess:
         except Exception as e:
             logger.error(f"Error in read loop setup: {e}", exc_info=True)
         finally:
+            # Check process exit status for diagnostics
+            exit_code = None
+            if self._proc is not None:
+                try:
+                    exit_code = self._proc.poll()
+                    if exit_code is not None:
+                        logger.error(f"MCP process terminated with exit code: {exit_code}")
+                    else:
+                        logger.warning("MCP process stdout closed but process still running")
+                except Exception as poll_err:
+                    logger.error(f"Error checking process exit code: {poll_err}")
+            
             logger.info("Read loop terminated, cleaning up pending futures")
             # Clean up any pending futures
+            error_msg = f"MCP process read loop terminated"
+            if exit_code is not None:
+                error_msg += f" (exit code: {exit_code})"
+            
             for rpc_id, fut in list(self._pending.items()):
                 if not fut.done():
-                    fut.set_exception(RuntimeError("MCP process read loop terminated"))
+                    fut.set_exception(RuntimeError(error_msg))
             self._pending.clear()
     
     async def send(self, request: Dict[str, Any]) -> Dict[str, Any]:
