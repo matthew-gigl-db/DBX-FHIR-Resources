@@ -6,6 +6,10 @@ resources:
       description: "An application to serve the Redox MCP Server on Databricks"
       lifecycle:
         prevent_destroy: false
+      config:
+        env:
+          - name: REDOX_BINARY_FILENAME
+            value: ${var.redox_binary_filename}
       resources:
         - name: redox_public_key
           description: "Redox Authentication Public Key"
