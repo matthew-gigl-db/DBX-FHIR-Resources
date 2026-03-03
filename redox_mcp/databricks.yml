@@ -36,6 +36,9 @@ variables:
   token_url:
     description: OAuth2 Token URL
     default: 'https://api.redoxengine.com/fhir/R4/redox-fhir-sandbox/Development/'
+  redox_binary_filename:
+    description: The filename of the Redox MCP binary in the source_bin volume
+    default: redox-mcp-linux-x64
   run_as_user:
     description: The User that the workflows should run as.
   higher_level_service_principal:

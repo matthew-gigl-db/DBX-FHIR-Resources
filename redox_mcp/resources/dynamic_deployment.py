@@ -25,6 +25,7 @@ class Variables:
     secret_scope_name: Variable[str]
     client_id_dbs_key: Variable[str]
     run_as_user: Variable[str]
+    redox_binary_filename: Variable[str]
 
 
 class DynamicResources:
@@ -54,6 +55,7 @@ class DynamicResources:
         self.secret_scope_name = self.bundle.resolve_variable(Variables.secret_scope_name)
         self.client_id_dbs_key = self.bundle.resolve_variable(Variables.client_id_dbs_key)
         self.run_as_user = self.bundle.resolve_variable(Variables.run_as_user)
+        self.redox_binary_filename = self.bundle.resolve_variable(Variables.redox_binary_filename)
         self.workspace_client = WorkspaceClient()
         self._resources_dir = Path(__file__).parent
 
@@ -110,7 +112,7 @@ class DynamicResources:
 
     def deploy_app_if_ready(
         self,
-        binary_filename: str,
+        binary_filename: Optional[str] = None,
         app_yaml_path: Optional[str] = None,
         volume_key: str = DEFAULT_VOLUME_KEY
     ) -> bool:
@@ -120,7 +122,8 @@ class DynamicResources:
         file exists in volume.
         
         Args:
-            binary_filename: Name of the binary file to check for in the volume
+            binary_filename: Name of the binary file to check for in the volume.
+                           If None, uses the bundle variable redox_binary_filename.
             app_yaml_path: Path to the app YAML configuration file.
                           Defaults to redox_mcp_serving.app.yml in the same 
                           directory as this Python file.
@@ -131,6 +134,10 @@ class DynamicResources:
             True if app was deployed, False if prerequisites not met or 
             deployment failed
         """
+        # Use bundle variable if binary_filename not provided
+        if binary_filename is None:
+            binary_filename = self.redox_binary_filename
+        
         # Check all three prerequisites
         scope_exists, key_exists = self._check_secret_scope_and_key()
         file_exists = self._check_file_in_volume(binary_filename, volume_key)
