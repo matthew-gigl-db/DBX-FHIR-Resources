@@ -11,7 +11,7 @@ command: [
 env: 
 
   - name: REDOX_BINARY_FILENAME
-    valueFrom: ${var.redox_binary_filename}
+    value: ${var.redox_binary_filename}
 
   - name: REDOX_BINARY_VOLUME
     valueFrom: bin_volume
