@@ -29,6 +29,9 @@ variables:
   token_url:
     description: OAuth2 Token URL
     default: 'https://api.redoxengine.com/fhir/R4/redox-fhir-sandbox/Development/'
+  redox_binary_filename:
+    description: The filename of the Redox MCP binary in the source_bin volume
+    default: redox-mcp-linux-x64
   run_as_user:
     description: The User that the workflows should run as.
   higher_level_service_principal:
@@ -141,3 +144,33 @@ targets:
     permissions:
       - user_name: matthew.giglia@databricks.com
         level: CAN_MANAGE
+
+  # The 'prod' target, used for production deployment.
+  himss2026:
+    mode: production
+    presets:
+      source_linked_deployment: false
+      tags:
+        project: ${var.tags_project}
+        businessUnit: ${var.tags_businessUnit}
+        requestedBy: ${var.tags_requestedBy}
+        developer: ${var.tags_developer}
+        RemoveAfter: ${var.tags_RemoveAfter}
+        env: ${bundle.target}
+    workspace:
+      host: https://fe-sandbox-himss2026.cloud.databricks.com/
+      root_path: /Workspace/.bundle/${bundle.name}/${bundle.target}
+    # run_as:
+    #   user_name: ${var.run_as_user}
+    variables:
+      catalog: himss
+      schema: redox
+      higher_level_service_principal: aa7772ac-75bc-4f18-8dee-d58e50a11cd0
+      run_as_user: ${var.higher_level_service_principal}
+      client_id_dbs_key: client_id
+      token_url: 'https://api.redoxengine.com/fhir/R4/redox-fhir-sandbox/Staging/'
+    permissions:
+      - user_name: matthew.giglia@databricks.com
+        level: CAN_MANAGE
+      - group_name: users
+        level: CAN_RUN
