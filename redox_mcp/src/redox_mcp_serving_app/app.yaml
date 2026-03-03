@@ -10,6 +10,9 @@ command: [
 ]
 env: 
 
+  - name: REDOX_BINARY_FILENAME
+    value: redox-mcp-linux-x64
+
   - name: REDOX_BINARY_VOLUME
     valueFrom: bin_volume
 

@@ -5,11 +5,7 @@ resources:
       source_code_path: ../src/redox_mcp_serving_app/
       description: "An application to serve the Redox MCP Server on Databricks"
       lifecycle:
-        prevent_destroy: false
-      config:
-        env:
-          - name: REDOX_BINARY_FILENAME
-            value: redox-mcp-linux-x64
+        prevent_destroy: true
       resources:
         - name: redox_public_key
           description: "Redox Authentication Public Key"
