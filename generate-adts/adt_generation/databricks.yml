@@ -52,7 +52,7 @@ variables:
   
   relative_path:
     description: "Relative path within volume for output files"
-    default: "adt_fake"
+    default: "adt"
 
 targets:
   # The 'dev' target, for development purposes. This target is the default.
