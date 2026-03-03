@@ -21,7 +21,7 @@ targets:
     mode: development
     default: true
     workspace:
-      host: https://fe-sandbox-himss2026.cloud.databricks.com
+      host: https://fe-vm-mkgs-databricks-demos.cloud.databricks.com
     variables:
       catalog: "dev_catalog"
       schema: "dev_schema"
@@ -30,7 +30,7 @@ targets:
   himss2026:
     mode: production
     workspace:
-      host: https://fe-vm-mkgs-databricks-demos.cloud.databricks.com
+      host: https://fe-sandbox-himss2026.cloud.databricks.com/
       root_path: /Workspace/.bundle/${bundle.name}/${bundle.target}
     run_as:
       # This runs as matthew.giglia@databricks.com in production. We could also use a service principal here,
