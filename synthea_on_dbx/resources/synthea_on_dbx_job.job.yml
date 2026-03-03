@@ -15,7 +15,7 @@ resources:
         - environment_key: primary
           spec:
             environment_version: ${var.serverless_environment_version}
-            dependencies: []
+            dependencies: []  
 
       #email_notifications:
       #  on_failure:
@@ -81,6 +81,7 @@ resources:
           run_if: AT_LEAST_ONE_SUCCESS
           notebook_task:
             notebook_path: ../src/1.0-synthea-data-generator.py
+          environment_key: primary
         
         # - task_key: inject_bad_date
         #   depends_on:
