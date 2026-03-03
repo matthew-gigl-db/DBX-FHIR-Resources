@@ -27,7 +27,7 @@ targets:
       schema: "dev_schema"
 
   # The 'prod' target, used for production deployment.
-  prod:
+  himss2026:
     mode: production
     workspace:
       host: https://fe-vm-mkgs-databricks-demos.cloud.databricks.com
