@@ -11,6 +11,10 @@ variables:
     description: "Unity Catalog schema name for volumes"
     default: "default"
 
+  external_location:
+    description: "Base S3 path for external volumes"
+    default: "s3://your-bucket/volumes"
+
 include:
   - resources/*.yml
   - resources/*/*.yml
@@ -39,3 +43,4 @@ targets:
     variables:
       catalog: "himss"
       schema: "redox"
+      external_location: "s3://himss2026-external-s3bucket/himss2026"
