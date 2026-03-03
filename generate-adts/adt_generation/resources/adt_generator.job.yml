@@ -1,0 +1,73 @@
+resources:
+  jobs:
+    adt_generator_job:
+      name: "ADT Message Generator - ${bundle.target}"
+      
+      # Job schedule (optional - uncomment to enable)
+      # schedule:
+      #   quartz_cron_expression: "0 0 2 * * ?" # Daily at 2 AM
+      #   timezone_id: "America/New_York"
+      #   pause_status: "UNPAUSED"
+      
+      # Email notifications (optional)
+      email_notifications:
+        # on_success:
+        #   - matthew.giglia@databricks.com
+        on_failure:
+          - matthew.giglia@databricks.com
+      
+      # Timeout configuration
+      timeout_seconds: 7200  # 2 hours
+      max_concurrent_runs: 1
+      
+      tasks:
+        - task_key: generate_hl7_adt_messages
+          description: "Generate synthetic HL7 ADT messages with Phase 1 & 2 enhancements"
+          
+          notebook_task:
+            notebook_path: ../src/adt-generators
+            source: WORKSPACE
+            
+            # Pass variables as notebook parameters
+            base_parameters:
+              num_patients: "${var.num_patients}"
+              events_per_patient_max: "${var.events_per_patient_max}"
+              hl7_version: "${var.hl7_version}"
+              sending_app: "${var.sending_app}"
+              sending_facility: "${var.sending_facility}"
+              receiving_app: "${var.receiving_app}"
+              receiving_facility: "${var.receiving_facility}"
+              catalog_use: "${var.catalog_use}"
+              schema_use: "${var.schema_use}"
+              volume_name: "${var.volume_name}"
+              relative_path: "${var.relative_path}"
+          
+          # Serverless compute configuration
+          new_cluster:
+            spark_version: "15.4.x-scala2.12"
+            node_type_id: "i3.xlarge"
+            num_workers: 2
+            spark_conf:
+              "spark.databricks.cluster.profile": "serverless"
+            custom_tags:
+              project: "adt_generation"
+              owner: "matthew.giglia@databricks.com"
+          
+          # Libraries
+          libraries:
+            - pypi:
+                package: "faker"
+          
+          # Timeout for this specific task
+          timeout_seconds: 3600  # 1 hour
+          
+          # Retry configuration
+          max_retries: 2
+          min_retry_interval_millis: 60000  # 1 minute
+          retry_on_timeout: true
+      
+      # Job-level tags
+      tags:
+        environment: "${bundle.target}"
+        project: "adt_generation"
+        notebook: "adt-generators"
