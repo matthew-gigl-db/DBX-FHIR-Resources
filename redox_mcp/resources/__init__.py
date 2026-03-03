@@ -18,7 +18,7 @@ def load_resources(bundle: Bundle) -> Resources:
     
     This implementation:
     1. Loads static resources from YAML files in the resources folder
-    2. Dynamically deploys additional resources based on runtime checks
+    2. Attempts dynamic deployment if authentication is available
     3. Merges dynamic resources into the base resources
     """
     
@@ -26,31 +26,51 @@ def load_resources(bundle: Bundle) -> Resources:
     logger.info("Loading base resources from YAML files...")
     base_resources = load_resources_from_current_package_module()
     
-    # Initialize dynamic deployment manager
-    logger.info("Initializing dynamic deployment...")
-    deployer = DynamicResources(bundle)
-    
-    # Deploy secret scope if missing
-    deployer.deploy_secret_scope_if_missing()
-    
-    # Deploy app if all prerequisites are met
-    # Uses the bundle variable redox_binary_filename for the binary filename
-    deployer.deploy_app_if_ready()
-    
-    # Get the dynamically added resources
-    dynamic_resources = deployer.get_resources()
-    
-    # Merge dynamic resources into base resources
-    if hasattr(dynamic_resources, 'secret_scopes') and dynamic_resources.secret_scopes:
-        if not hasattr(base_resources, 'secret_scopes'):
-            base_resources.secret_scopes = {}
-        base_resources.secret_scopes.update(dynamic_resources.secret_scopes)
-        logger.info("Merged dynamic secret scopes into base resources")
-    
-    if hasattr(dynamic_resources, 'apps') and dynamic_resources.apps:
-        if not hasattr(base_resources, 'apps'):
-            base_resources.apps = {}
-        base_resources.apps.update(dynamic_resources.apps)
-        logger.info("Merged dynamic apps into base resources")
+    # Attempt dynamic deployment with graceful fallback
+    try:
+        logger.info("Attempting dynamic deployment...")
+        deployer = DynamicResources(bundle)
+        
+        # Deploy secret scope if missing
+        deployer.deploy_secret_scope_if_missing()
+        
+        # Deploy app if all prerequisites are met
+        # Uses the bundle variable redox_binary_filename for the binary filename
+        deployer.deploy_app_if_ready()
+        
+        # Get the dynamically added resources
+        dynamic_resources = deployer.get_resources()
+        
+        # Merge dynamic resources into base resources
+        if hasattr(dynamic_resources, 'secret_scopes') and dynamic_resources.secret_scopes:
+            if not hasattr(base_resources, 'secret_scopes'):
+                base_resources.secret_scopes = {}
+            base_resources.secret_scopes.update(dynamic_resources.secret_scopes)
+            logger.info("Merged dynamic secret scopes into base resources")
+        
+        if hasattr(dynamic_resources, 'apps') and dynamic_resources.apps:
+            if not hasattr(base_resources, 'apps'):
+                base_resources.apps = {}
+            base_resources.apps.update(dynamic_resources.apps)
+            logger.info("Merged dynamic apps into base resources")
+        
+        logger.info("Dynamic deployment completed successfully")
+        
+    except ValueError as e:
+        # Authentication failed - this is expected during bundle deployment
+        logger.warning(
+            "Dynamic deployment skipped due to authentication: %s. "
+            "This is normal during 'databricks bundle deploy' from CLI. "
+            "To enable dynamic deployment, ensure ~/.databrickscfg is configured "
+            "or run a post-deployment setup job.",
+            str(e)
+        )
+    except Exception as e:
+        # Other errors - log but don't fail the deployment
+        logger.warning(
+            "Dynamic deployment failed: %s. Proceeding with static resources only.",
+            str(e),
+            exc_info=True
+        )
     
     return base_resources

@@ -56,7 +56,10 @@ class DynamicResources:
         self.client_id_dbs_key = self.bundle.resolve_variable(Variables.client_id_dbs_key)
         self.run_as_user = self.bundle.resolve_variable(Variables.run_as_user)
         self.redox_binary_filename = self.bundle.resolve_variable(Variables.redox_binary_filename)
-        self.workspace_client = WorkspaceClient()
+        
+        # Initialize workspace client with fallback authentication strategies
+        # Try profile-based auth (works in CLI context) before runtime auth
+        self.workspace_client = self._initialize_workspace_client()
         self._resources_dir = Path(__file__).parent
 
     def deploy_secret_scope_if_missing(
@@ -217,6 +220,65 @@ class DynamicResources:
         return self.resources
     
     # Private methods
+    
+    def _initialize_workspace_client(self) -> WorkspaceClient:
+        """Initialize WorkspaceClient with fallback authentication strategies.
+        
+        Tries multiple authentication methods in order:
+        1. Default profile from ~/.databrickscfg (works in CLI context)
+        2. Environment variables (DATABRICKS_HOST, DATABRICKS_TOKEN)
+        3. Runtime authentication (works in notebook context)
+        
+        Returns:
+            Configured WorkspaceClient instance
+            
+        Raises:
+            ValueError: If no authentication method succeeds
+        """
+        import os
+        from databricks.sdk.config import Config
+        
+        # Strategy 1: Try default profile (CLI context)
+        try:
+            # This uses ~/.databrickscfg DEFAULT profile
+            client = WorkspaceClient()
+            # Test the connection
+            client.current_user.me()
+            logger.info("Authenticated using default profile")
+            return client
+        except Exception as e:
+            logger.debug("Default profile authentication failed: %s", e)
+        
+        # Strategy 2: Try environment variables
+        try:
+            host = os.getenv('DATABRICKS_HOST')
+            token = os.getenv('DATABRICKS_TOKEN')
+            if host and token:
+                client = WorkspaceClient(host=host, token=token)
+                client.current_user.me()
+                logger.info("Authenticated using environment variables")
+                return client
+        except Exception as e:
+            logger.debug("Environment variable authentication failed: %s", e)
+        
+        # Strategy 3: Try runtime authentication (notebook context)
+        # This will fail during bundle deployment but works in notebooks
+        try:
+            config = Config()
+            client = WorkspaceClient(config=config)
+            client.current_user.me()
+            logger.info("Authenticated using runtime credentials")
+            return client
+        except Exception as e:
+            logger.debug("Runtime authentication failed: %s", e)
+        
+        # All strategies failed
+        raise ValueError(
+            "Failed to authenticate WorkspaceClient. Tried: "
+            "1) default profile, 2) environment variables, 3) runtime auth. "
+            "Ensure you have a configured Databricks profile in ~/.databrickscfg "
+            "or set DATABRICKS_HOST and DATABRICKS_TOKEN environment variables."
+        )
     
     def _check_secret_scope_and_key(self) -> tuple[bool, bool]:
         """Check if the secret scope exists and if the client ID key is present.
