@@ -86,7 +86,7 @@ async def lifespan(app: FastAPI):
         
         # Pass the raw serialized FileDescriptor bytes (message type auto-inferred)
         descriptor_bytes = fhir_bundle_pb2.FhirBundle.DESCRIPTOR.file.serialized_pb
-        table_props = TableProperties(FHIR_BUNDLE_TABLE_NAME, descriptor_bytes)
+        table_props = TableProperties(table_name=FHIR_BUNDLE_TABLE_NAME, descriptor_proto=descriptor_bytes)
         options = StreamConfigurationOptions(
             record_type=RecordType.PROTO,
             max_inflight_records=10_000,
