@@ -27,7 +27,7 @@ resources:
             key: client_secret
             permission: "READ"
         - name: zerobus_endpoint
-          description: "Zerobus Endpoint"
+          description: "Zerobus Endpoint of the form https://<workspace-id-or-shard-id>.zerobus.<region>.cloud.databricks.com"
           secret: 
             scope: ${var.secret_scope_name}
             key: zerobus_endpoint
