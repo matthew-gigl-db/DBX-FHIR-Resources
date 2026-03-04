@@ -18,7 +18,7 @@ env:
     valueFrom: zerobus_client_secret
 
   - name: ZEROBUS_SERVER_ENDPOINT
-    value: zerobus_endpoint
+    valueFrom: zerobus_endpoint
 
   - name: WORKSPACE_URL
     valueFrom: workspace_url
