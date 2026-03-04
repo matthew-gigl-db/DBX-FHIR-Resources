@@ -10,7 +10,7 @@ variables:
   # Patient generation parameters
   num_patients:
     description: "Number of synthetic patients to generate"
-    default: "327"
+    default: "27"
   
   events_per_patient_max:
     description: "Maximum number of ADT events per patient"
