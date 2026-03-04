@@ -1,5 +1,6 @@
 # app.py
 import uuid
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
