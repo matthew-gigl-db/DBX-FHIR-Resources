@@ -1,0 +1,4 @@
+databricks-zerobus-ingest-sdk
+databricks-sdk
+fastapi
+uvicorn[standard]
