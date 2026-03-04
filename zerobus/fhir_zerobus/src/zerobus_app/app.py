@@ -263,18 +263,22 @@ async def ingest_fhir_bundle(
     
     # Generate unique bundle ID
     bundle_uuid = str(uuid.uuid4())
-    timestamp = datetime.now(timezone.utc).isoformat()
+    # Use RFC3339 format with 'Z' suffix (more compatible with Spark/Databricks)
+    # Remove microseconds to avoid parsing issues: 2024-03-04T18:12:09Z
+    timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     user_email = user_info.get("userName", "unknown")
     
     # Shape the record to match the table schema
-    # Note: Convert payload to JSON string for VARIANT column
     record = {
         "bundle_uuid": bundle_uuid,
-        "fhir": json.dumps(payload),  # Serialize to JSON string for Zerobus
+        "fhir": json.dumps(payload),  # VARIANT column expects JSON string
         "source_system": app.title,
         "event_timestamp": timestamp,
         "user_email": user_email,
     }
+    
+    # Log record for debugging (excluding large payload)
+    logger.info(f"Ingesting record - UUID: {bundle_uuid}, User: {user_email}, Timestamp: {timestamp}")
     
     # Ingest to Zerobus with error handling
     try:
