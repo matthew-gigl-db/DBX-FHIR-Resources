@@ -1,13 +1,14 @@
 command: [
   "uvicorn"
-  ,"redox_http_proxy:app"
+  ,"app:app"
   ,"--host"
   ,"0.0.0.0"
   ,"--port"
   ,"8000"
   ,"--log-level"
-  ,"debug"
+  ,"info"
 ]
+
 env: 
 
   - name: ZEROBUS_SERVER_ENDPOINT
