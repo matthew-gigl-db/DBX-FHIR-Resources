@@ -56,7 +56,7 @@ def shutdown_event():
             print(f"Error closing Zerobus stream: {e}")
 
 
-@app.post("/ingest/fhir-bundle")
+@app.post("/api/v1/ingest/fhir-bundle")
 async def ingest_fhir_bundle(request: Request):
     """
     Accepts arbitrary JSON (e.g., a FHIR Bundle) and writes it
