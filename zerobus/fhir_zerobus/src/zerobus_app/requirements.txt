@@ -1,4 +1,7 @@
+fastapi
+uvicorn
+httpx  # New: async HTTP client
+pydantic
+zerobus-sdk
 databricks-zerobus-ingest-sdk
 databricks-sdk
-fastapi
-uvicorn[standard]
