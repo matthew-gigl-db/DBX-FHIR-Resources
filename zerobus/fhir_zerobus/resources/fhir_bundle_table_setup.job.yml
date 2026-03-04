@@ -4,7 +4,7 @@
 resources:
   jobs:
     fhir_bundle_table_setup:
-      name: fhir_bundle_table_setup
+      name: Redox-ZeroBus FHIR Bundle Ingest Table DDL
       
       # No trigger/schedule - this is a one-time setup job, run manually as needed
       
