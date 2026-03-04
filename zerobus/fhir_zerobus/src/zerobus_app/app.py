@@ -84,9 +84,9 @@ async def lifespan(app: FastAPI):
         # Create SDK client
         zerobus_sdk = ZerobusSdk(ZEROBUS_SERVER_ENDPOINT, WORKSPACE_URL)
         
-        # Pass the raw serialized FileDescriptor bytes
+        # Pass the raw serialized FileDescriptor bytes and fully qualified message type
         descriptor_bytes = fhir_bundle_pb2.FhirBundle.DESCRIPTOR.file.serialized_pb
-        table_props = TableProperties(FHIR_BUNDLE_TABLE_NAME, descriptor_bytes)
+        table_props = TableProperties(FHIR_BUNDLE_TABLE_NAME, descriptor_bytes, "fhir.FhirBundle")
         options = StreamConfigurationOptions(
             record_type=RecordType.PROTO,
             max_inflight_records=10_000,
@@ -308,10 +308,6 @@ async def ingest_fhir_bundle(
     # Format timestamp for response (ISO 8601 with Z suffix)
     timestamp_str = event_timestamp.strftime('%Y-%m-%dT%H:%M:%SZ')
     
-    # Debug: Verify message type
-    logger.info(f"Message type: {type(msg)}, is Message: {isinstance(msg, proto_message.Message)}")
-    logger.info(f"Message has SerializeToString: {hasattr(msg, 'SerializeToString')}")
-    
     # Log record for debugging (excluding large payload)
     logger.info(f"Ingesting protobuf record - UUID: {bundle_uuid}, User: {user_email}, Timestamp: {timestamp_str}")
     
@@ -319,11 +315,7 @@ async def ingest_fhir_bundle(
     try:
         zerobus_stream = request.app.state.zerobus_stream
         
-        # Try serializing the message ourselves as a workaround
-        serialized_msg = msg.SerializeToString()
-        logger.info(f"Serialized message size: {len(serialized_msg)} bytes")
-        
-        # Pass the Message object (SDK should handle serialization)
+        # Ingest protobuf message (SDK handles serialization)
         offset = zerobus_stream.ingest_record_offset(msg)
         
         logger.info(f"Successfully ingested bundle {bundle_uuid} for user {user_email} at offset {offset}")
