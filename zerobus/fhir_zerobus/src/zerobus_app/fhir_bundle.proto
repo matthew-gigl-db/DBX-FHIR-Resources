@@ -1,6 +1,8 @@
 // fhir_bundle.proto
 syntax = "proto3";
 
+package fhir;
+
 message FhirBundle {
   // STRING
   string bundle_uuid = 1;
