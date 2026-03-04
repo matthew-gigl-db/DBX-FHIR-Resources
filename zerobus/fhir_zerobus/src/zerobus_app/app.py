@@ -276,7 +276,7 @@ async def ingest_fhir_bundle(
     record = {
         "bundle_uuid": bundle_uuid,
         "fhir": fhir_json_string,  # VARIANT column: JSON as string
-        "source_system": app.title,
+        "source_system": "FHIR to Zerobus Ingest App",
         "event_timestamp": timestamp,
         "user_email": user_email,
     }
