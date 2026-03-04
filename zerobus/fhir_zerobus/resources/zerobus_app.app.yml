@@ -11,7 +11,7 @@ resources:
         using Databricks Zerobus SDK
       
       # Source code location relative to bundle root
-      source_code_path: ./src/zerobus_app
+      source_code_path: ../src/zerobus_app
 
       resources:
         - name: zerobus_client_id
