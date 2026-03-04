@@ -1,0 +1,23 @@
+# Databricks App resource configuration for FHIR Bundle Zerobus Ingest Application
+# This app receives FHIR bundles via POST requests and streams them to Unity Catalog via Zerobus
+
+resources:
+  apps:
+    fhir_zerobus_ingest_app:
+      name: FHIR Zerobus Ingest
+      description: >
+        FastAPI application that ingests FHIR bundles via REST API and 
+        streams them to Unity Catalog table ${var.catalog}.${var.schema}.fhir_bundle_zerobus 
+        using Databricks Zerobus SDK
+      
+      # Source code location relative to bundle root
+      source_code_path: ./src/zerobus_app
+      
+      # App permissions - who can use/manage the app
+      permissions:
+        - user_name: matthew.giglia@databricks.com
+          level: CAN_MANAGE
+        - group_name: users
+          level: CAN_USE
+
+      

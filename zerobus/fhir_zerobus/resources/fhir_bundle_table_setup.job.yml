@@ -1,0 +1,73 @@
+# Job to create the FHIR Bundle Zerobus target table in Unity Catalog
+# This is a one-time setup job (no schedule) that creates the table if it doesn't exist
+
+resources:
+  jobs:
+    fhir_bundle_table_setup:
+      name: fhir_bundle_table_setup
+      
+      # No trigger/schedule - this is a one-time setup job, run manually as needed
+      
+      description: >
+        One-time setup job to create the fhir_bundle_zerobus table in Unity Catalog.
+        Creates the table with VARIANT support, primary key, and optimized Delta settings.
+      
+      parameters:
+        - name: catalog_use
+          default: ${var.catalog}
+        - name: schema_use
+          default: ${var.schema}
+        - name: redox_spn
+          default: ${var.redox_service_principal}
+      
+      tasks:
+        - task_key: create_fhir_bundle_table
+          notebook_task:
+            notebook_path: ../src/uc_setup/target-table-ddl
+            source: WORKSPACE
+          
+          # Use environment for serverless SQL execution
+          environment_key: default
+      
+      # Use serverless environment configured in bundle
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "${var.serverless_environment_version}"
+      
+      # Use max concurrent runs of 1 to prevent conflicts
+      max_concurrent_runs: 1
+      
+      # Timeout after 10 minutes if something goes wrong
+      timeout_seconds: 600
+      
+      tags:
+        component: setup
+        resource_type: table
+        table_name: fhir_bundle_zerobus
+
+# Target-specific configurations
+targets:
+  dev:
+    resources:
+      jobs:
+        fhir_bundle_table_setup:
+          name: "[DEV] FHIR Bundle Table Setup"
+  
+  himss2026:
+    resources:
+      jobs:
+        fhir_bundle_table_setup:
+          name: "[HIMSS2026] FHIR Bundle Table Setup"
+  
+  prod:
+    resources:
+      jobs:
+        fhir_bundle_table_setup:
+          name: "[PROD] FHIR Bundle Table Setup"
+  
+  free_edition:
+    resources:
+      jobs:
+        fhir_bundle_table_setup:
+          name: "[FREE] FHIR Bundle Table Setup"
