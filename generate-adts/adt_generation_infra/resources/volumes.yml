@@ -1,0 +1,17 @@
+resources:
+  volumes:
+    landing:
+      catalog_name: ${var.catalog}
+      schema_name: ${var.schema}
+      name: landing
+      volume_type: EXTERNAL
+      storage_location: ${var.external_location}/landing
+      comment: "Landing volume for incoming data"
+    
+    extract:
+      catalog_name: ${var.catalog}
+      schema_name: ${var.schema}
+      name: extract
+      volume_type: EXTERNAL
+      storage_location: ${var.external_location}/extract
+      comment: "Extract volume for processed data"

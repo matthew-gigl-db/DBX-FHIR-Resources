@@ -1,0 +1,46 @@
+# Databricks Asset Bundle configuration, more info here: https://docs.databricks.com/en/dev-tools/bundles/settings.html
+bundle:
+  name: "adt_generation_infra"
+
+variables:
+  catalog:
+    description: "Unity Catalog catalog name for volumes"
+    default: "main"
+  
+  schema:
+    description: "Unity Catalog schema name for volumes"
+    default: "default"
+
+  external_location:
+    description: "Base S3 path for external volumes"
+    default: "s3://your-bucket/volumes"
+
+include:
+  - resources/*.yml
+  - resources/*/*.yml
+
+targets:
+  # The 'dev' target, for development purposes. This target is the default.
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://fe-vm-mkgs-databricks-demos.cloud.databricks.com
+    variables:
+      catalog: "dev_catalog"
+      schema: "dev_schema"
+
+  # The 'prod' target, used for production deployment.
+  himss2026:
+    mode: production
+    workspace:
+      host: https://fe-sandbox-himss2026.cloud.databricks.com/
+      root_path: /Workspace/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      # This runs as matthew.giglia@databricks.com in production. We could also use a service principal here,
+      # see https://docs.databricks.com/dev-tools/bundles/permissions.html.
+      user_name: matthew.giglia@databricks.com
+    variables:
+      catalog: "himss"
+      schema: "redox"
+      external_location: "s3://himss2026-external-s3bucket/himss2026"

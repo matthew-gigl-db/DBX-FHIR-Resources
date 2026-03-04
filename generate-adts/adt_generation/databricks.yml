@@ -1,0 +1,79 @@
+# Databricks Asset Bundle configuration, more info here: https://docs.databricks.com/en/dev-tools/bundles/settings.html
+bundle:
+  name: "adt_generation"
+
+include:
+  - resources/*.yml
+  - resources/*/*.yml
+
+variables:
+  # Patient generation parameters
+  num_patients:
+    description: "Number of synthetic patients to generate"
+    default: "27"
+  
+  events_per_patient_max:
+    description: "Maximum number of ADT events per patient"
+    default: "8"
+  
+  # HL7 configuration
+  hl7_version:
+    description: "HL7 version for message generation"
+    default: "2.5"
+  
+  sending_app:
+    description: "HL7 sending application identifier"
+    default: "DATABRICKS_SIM"
+  
+  sending_facility:
+    description: "HL7 sending facility identifier"
+    default: "DBX_FAC"
+  
+  receiving_app:
+    description: "HL7 receiving application identifier"
+    default: "DOWNSTREAM_SYS"
+  
+  receiving_facility:
+    description: "HL7 receiving facility identifier"
+    default: "DST_FAC"
+  
+  # Storage configuration
+  catalog_use:
+    description: "Unity Catalog name for output"
+    default: "main"
+  
+  schema_use:
+    description: "Schema name within catalog"
+    default: "healthcare"
+  
+  volume_name:
+    description: "Volume name for HL7 file storage"
+    default: "hl7_synthetic"
+  
+  relative_path:
+    description: "Relative path within volume for output files"
+    default: "adt"
+
+targets:
+  # The 'dev' target, for development purposes. This target is the default.
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://fe-vm-mkgs-databricks-demos.cloud.databricks.com
+      root_path: /Workspace/Users/${var.run_as_user}/.bundle/${bundle.name}/${bundle.target}
+
+  # The 'prod' target, used for production deployment.
+  himss2026:
+    mode: production
+    workspace:
+      host: https://fe-sandbox-himss2026.cloud.databricks.com/
+      root_path: /Workspace/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      # This runs as matthew.giglia@databricks.com in production. We could also use a service principal here,
+      # see https://docs.databricks.com/dev-tools/bundles/permissions.html.
+      user_name: matthew.giglia@databricks.com
+    variables:
+      catalog_use: himss
+      schema_use: redox
+      volume_name: extract

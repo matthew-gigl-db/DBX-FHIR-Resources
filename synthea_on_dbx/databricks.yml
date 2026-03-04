@@ -24,6 +24,9 @@ variables:
   #   default: ml_artifacts 
   notifications:
     description: The email addresses to use for failure notifications
+  higher_level_service_principal:
+    description: The service principal name (application ID) for higher level deployments.  Comment this out if you are not using a service_principal for deployments above the dev target.
+    default: 47c0365e-b1af-429c-b56d-07cfb18b5dc7
   run_as_user:
     description: The user that the workflows or other assets should run as, may typcially have ownership over the assets.  
   # run_as_user_permissions:
@@ -121,5 +124,41 @@ targets:
       schema: synthea_data_gen
       notifications: []
       run_as_user: matthew.giglia@databricks.com
+      # run_as_user_permissions: ["CAN_MANAGE", "CAN_RUN", "CAN_MANAGE_RUN"]
+      # user_permissions: ["CAN_READ", "CAN_VIEW"]
+
+  himss2026:
+    presets:
+      # name_prefix: '[${bundle.target} ${workspace.current_user.short_name}] '
+      source_linked_deployment: false
+      trigger_pause_status: PAUSED
+      jobs_max_concurrent_runs: 1
+      pipelines_development: false
+      tags:
+        parentProject: ${var.tags_parentProject}
+        project: ${var.tags_project}
+        businessUnit: ${var.tags_businessUnit}
+        requestedBy: ${var.tags_requestedBy}
+        developer: ${var.tags_developer}
+        RemoveAfter: ${var.tags_RemoveAfter}
+        env: ${bundle.target}
+    default: false
+    workspace:
+      host: https://fe-sandbox-himss2026.cloud.databricks.com
+      root_path: /Workspace/.bundle/${bundle.name}/${bundle.target}
+    # git:
+    #   origin_url: https://github.com/mkgs-databricks-demos/synthea-on-fhir.git
+    #   branch: main
+    permissions:
+      - user_name: matthew.giglia@databricks.com
+        level: CAN_MANAGE
+      - group_name: users
+        level: CAN_RUN
+    variables:
+      catalog: himss
+      schema: synthea_data_gen
+      notifications: []
+      higher_level_service_principal: aa7772ac-75bc-4f18-8dee-d58e50a11cd0
+      run_as_user: ${var.higher_level_service_principal}
       # run_as_user_permissions: ["CAN_MANAGE", "CAN_RUN", "CAN_MANAGE_RUN"]
       # user_permissions: ["CAN_READ", "CAN_VIEW"]
