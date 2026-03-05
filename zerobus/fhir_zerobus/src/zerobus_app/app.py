@@ -298,10 +298,13 @@ async def ingest_fhir_bundle(
     try:
         zerobus_stream = request.app.state.zerobus_stream
         
-        # Ingest JSON record
-        zerobus_stream.ingest(record)
+        # Debug logging for stream type
+        logger.debug(f"Stream type: {type(zerobus_stream).__name__}")
         
-        logger.info(f"Successfully ingested bundle {bundle_uuid} for user {user_email}")
+        # Ingest JSON record (returns offset immediately)
+        offset = zerobus_stream.ingest_record_offset(record)
+        
+        logger.info(f"Successfully ingested bundle {bundle_uuid} for user {user_email} at offset {offset}")
         
     except Exception as e:
         logger.error(f"Failed to write to Zerobus: {e}", exc_info=True)
