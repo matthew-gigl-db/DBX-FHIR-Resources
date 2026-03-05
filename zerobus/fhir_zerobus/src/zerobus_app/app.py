@@ -17,6 +17,7 @@ from zerobus.sdk.shared import RecordType, StreamConfigurationOptions, TableProp
 
 import fhir_bundle_pb2
 from google.protobuf import message as proto_message
+from google.protobuf import descriptor_pb2
 
 def fhir_bundle_to_proto(bundle_uuid: str,
                          fhir_payload: dict,
@@ -84,14 +85,12 @@ async def lifespan(app: FastAPI):
         # Create SDK client
         zerobus_sdk = ZerobusSdk(ZEROBUS_SERVER_ENDPOINT, WORKSPACE_URL)
         
-        # Get FileDescriptor object directly (SDK will call CopyToProto internally)
-        file_descriptor = fhir_bundle_pb2.FhirBundle.DESCRIPTOR.file
+        # Use the serialized FileDescriptorSet from the descriptor pool
+        serialized_desc = fhir_bundle_pb2.DESCRIPTOR.serialized_pb
         
-        logger.info(f"FileDescriptor type: {type(file_descriptor)}")
-        logger.info(f"FileDescriptor name: {file_descriptor.name}")
+        logger.info(f"Serialized descriptor length: {len(serialized_desc)} bytes")
         
-        # Pass FileDescriptor as positional argument (SDK expects object with CopyToProto method)
-        table_props = TableProperties(FHIR_BUNDLE_TABLE_NAME, file_descriptor)
+        table_props = TableProperties(FHIR_BUNDLE_TABLE_NAME, serialized_desc)
         
         # Define acknowledgment callback for durability confirmation
         def ack_callback(offset: int):
