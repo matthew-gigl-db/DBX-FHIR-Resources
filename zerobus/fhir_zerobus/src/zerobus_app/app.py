@@ -287,8 +287,8 @@ async def ingest_fhir_bundle(
     user_email = user_info.get("userName", "unknown")
     event_timestamp = datetime.now(timezone.utc)
     
-    # Convert to Unix epoch for TIMESTAMP column (seconds since 1970-01-01)
-    timestamp_epoch = int(event_timestamp.timestamp())
+    # Convert to Unix epoch microseconds for TIMESTAMP column (Databricks TIMESTAMP uses microseconds!)
+    timestamp_epoch_micros = int(event_timestamp.timestamp() * 1_000_000)
     
     # Format for response (ISO 8601 with Z suffix for human readability)
     timestamp_str = event_timestamp.strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -299,7 +299,7 @@ async def ingest_fhir_bundle(
         "bundle_uuid": bundle_uuid,
         "fhir": payload_json_str,  # JSON-encoded string for VARIANT column
         "source_system": "FHIR to Zerobus Ingest App",
-        "event_timestamp": timestamp_epoch  # Unix epoch (integer)
+        "event_timestamp": timestamp_epoch_micros  # Unix epoch MICROSECONDS (required for Databricks TIMESTAMP)
     }
     
     # Log record for debugging (excluding large payload)
@@ -318,7 +318,7 @@ async def ingest_fhir_bundle(
             logger.info(f"Record validation passed. Body length: {len(body)}, FHIR length: {len(record['fhir'])}")
             logger.info(f"Record structure: bundle_uuid={record.get('bundle_uuid')}, "
                        f"source_system={record.get('source_system')}, "
-                       f"event_timestamp={record.get('event_timestamp')}, "
+                       f"event_timestamp={record.get('event_timestamp')} (microseconds), "
                        f"fhir_type={type(record.get('fhir')).__name__}")
             
             # Log serialized record sample for debugging
