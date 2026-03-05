@@ -285,18 +285,18 @@ async def ingest_fhir_bundle(
     user_email = user_info.get("userName", "unknown")
     event_timestamp = datetime.now(timezone.utc)
     
+    # Format timestamp consistently (ISO 8601 with Z suffix, no microseconds)
+    timestamp_str = event_timestamp.strftime('%Y-%m-%dT%H:%M:%SZ')
+    
     # Build JSON record matching table schema
     # Use normalized JSON string for VARIANT column
     record = {
         "bundle_uuid": bundle_uuid,
         "fhir": payload_normalized,  # Normalized JSON string for VARIANT column
         "source_system": "FHIR to Zerobus Ingest App",
-        "event_timestamp": event_timestamp.isoformat(),  # ISO 8601 format for TIMESTAMP
+        "event_timestamp": timestamp_str,  # ISO 8601 string (no microseconds)
         "user_email": user_email,
     }
-    
-    # Format timestamp for response (ISO 8601 with Z suffix)
-    timestamp_str = event_timestamp.strftime('%Y-%m-%dT%H:%M:%SZ')
     
     # Log record for debugging (excluding large payload)
     logger.info(f"Ingesting JSON record - UUID: {bundle_uuid}, User: {user_email}, Timestamp: {timestamp_str}")
@@ -305,8 +305,16 @@ async def ingest_fhir_bundle(
     try:
         zerobus_stream = request.app.state.zerobus_stream
         
-        # Debug logging for stream type
-        logger.debug(f"Stream type: {type(zerobus_stream).__name__}")
+        # Debug: Validate what the SDK will send (as suggested in Zerobus docs)
+        try:
+            body = json.dumps(record)  # This is what SDK sends internally
+            json.loads(body)  # Verify full record is valid JSON
+            json.loads(record["fhir"])  # Verify VARIANT field is valid JSON
+            logger.debug(f"Record validation passed. Body length: {len(body)}, FHIR length: {len(record['fhir'])}")
+        except Exception as validation_error:
+            logger.error(f"Record validation failed before sending to Zerobus: {validation_error}")
+            logger.error(f"Problematic record (first 500 chars): {json.dumps(record)[:500]}")
+            raise
         
         # Ingest record as Python dict (SDK handles JSON encoding internally)
         # Only VARIANT column values should be pre-encoded JSON strings
