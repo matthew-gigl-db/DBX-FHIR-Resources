@@ -284,7 +284,10 @@ async def ingest_fhir_bundle(
     user_email = user_info.get("userName", "unknown")
     event_timestamp = datetime.now(timezone.utc)
     
-    # Format timestamp consistently (ISO 8601 with Z suffix, no microseconds)
+    # Convert to Unix epoch for TIMESTAMP column (seconds since 1970-01-01)
+    timestamp_epoch = int(event_timestamp.timestamp())
+    
+    # Format for response (ISO 8601 with Z suffix for human readability)
     timestamp_str = event_timestamp.strftime('%Y-%m-%dT%H:%M:%SZ')
     
     # Build JSON record matching table schema
@@ -293,7 +296,7 @@ async def ingest_fhir_bundle(
         "bundle_uuid": bundle_uuid,
         "fhir": payload_normalized,  # Normalized JSON string for VARIANT column
         "source_system": "FHIR to Zerobus Ingest App",
-        "event_timestamp": timestamp_str,  # ISO 8601 string (no microseconds)
+        "event_timestamp": timestamp_epoch  # Unix epoch (integer)
     }
     
     # Log record for debugging (excluding large payload)
