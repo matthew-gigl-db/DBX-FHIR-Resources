@@ -85,15 +85,17 @@ async def lifespan(app: FastAPI):
         # Create SDK client
         zerobus_sdk = ZerobusSdk(ZEROBUS_SERVER_ENDPOINT, WORKSPACE_URL)
         
-        # Convert FileDescriptor to FileDescriptorProto message (required by SDK)
+        # Convert FileDescriptor to FileDescriptorProto message and serialize to bytes
         file_descriptor = fhir_bundle_pb2.FhirBundle.DESCRIPTOR.file
         file_descriptor_proto = descriptor_pb2.FileDescriptorProto()
         file_descriptor.CopyToProto(file_descriptor_proto)
         
-        logger.info(f"FileDescriptorProto type: {type(file_descriptor_proto)}")
-        logger.info(f"FileDescriptorProto name: {file_descriptor_proto.name}")
+        # Serialize the proto message to bytes (required by Zerobus SDK)
+        descriptor_bytes = file_descriptor_proto.SerializeToString()
         
-        table_props = TableProperties(table_name=FHIR_BUNDLE_TABLE_NAME, descriptor_proto=file_descriptor_proto)
+        logger.info(f"FileDescriptorProto serialized to {len(descriptor_bytes)} bytes")
+        
+        table_props = TableProperties(table_name=FHIR_BUNDLE_TABLE_NAME, descriptor_proto=descriptor_bytes)
         
         # Define acknowledgment callback for durability confirmation
         def ack_callback(offset: int):
