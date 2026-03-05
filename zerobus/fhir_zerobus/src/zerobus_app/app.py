@@ -88,15 +88,19 @@ async def lifespan(app: FastAPI):
         # Get the FileDescriptor from the module-level DESCRIPTOR
         file_descriptor = fhir_bundle_pb2.DESCRIPTOR
         
-        # Create a FileDescriptorSet containing this file
+        # Extract the serialized FileDescriptorProto bytes that are embedded in the generated file
+        # This avoids CopyToProto() which doesn't exist in pure-Python protobuf implementation
+        serialized_file_desc = file_descriptor.serialized_pb
+        
+        # Create a FileDescriptorSet and parse the embedded bytes into it
         file_descriptor_set = descriptor_pb2.FileDescriptorSet()
         file_descriptor_proto = file_descriptor_set.file.add()
-        file_descriptor.CopyToProto(file_descriptor_proto)
+        file_descriptor_proto.ParseFromString(serialized_file_desc)
         
-        # Serialize the FileDescriptorSet
+        # Serialize the complete FileDescriptorSet
         serialized_descriptor_set = file_descriptor_set.SerializeToString()
         
-        logger.info(f"FileDescriptorSet serialized, length: {len(serialized_descriptor_set)} bytes")
+        logger.info(f"FileDescriptorSet created from embedded bytes, length: {len(serialized_descriptor_set)} bytes")
         
         table_props = TableProperties(FHIR_BUNDLE_TABLE_NAME, serialized_descriptor_set)
         
