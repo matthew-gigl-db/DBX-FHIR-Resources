@@ -64,16 +64,10 @@ async def lifespan(app: FastAPI):
         logger.info(f"Initializing JSON stream for table: {FHIR_BUNDLE_TABLE_NAME}")
         table_props = TableProperties(FHIR_BUNDLE_TABLE_NAME)
         
-        # Define acknowledgment callback for durability confirmation
-        def ack_callback(offset: int):
-            """Called when Zerobus confirms record is durably written"""
-            logger.debug(f"Record acknowledged at offset: {offset}")
-        
         options = StreamConfigurationOptions(
             record_type=RecordType.JSON,  # Use JSON mode instead of PROTO
             max_inflight_records=10_000,
             recovery=True,
-            ack_callback=ack_callback,
         )
         
         # Open a long-lived JSON stream for this table
