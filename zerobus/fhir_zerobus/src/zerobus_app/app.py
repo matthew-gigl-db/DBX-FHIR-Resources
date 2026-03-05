@@ -3,12 +3,9 @@ import uuid
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Optional
 from contextlib import asynccontextmanager
 
-import httpx
-from fastapi import FastAPI, Request, HTTPException, Depends, Header, status
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -30,6 +27,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Constants
+SOURCE_SYSTEM_NAME = "FHIR to Zerobus Ingest App"
+MAX_INFLIGHT_RECORDS = 10_000
+
 
 # Pydantic models for request/response validation
 class IngestResponse(BaseModel):
@@ -46,33 +47,25 @@ class HealthResponse(BaseModel):
     timestamp: str = Field(..., description="ISO timestamp")
 
 
-# Application state management using lifespan (replaces deprecated on_event)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Lifespan context manager for startup and shutdown events.
-    Best practice replacement for deprecated @app.on_event decorators.
-    """
+    """Lifespan context manager for startup and shutdown events."""
     # Startup: Initialize Zerobus stream
     logger.info("Starting FHIR Zerobus Ingest App...")
     try:
-        # Create SDK client
         zerobus_sdk = ZerobusSdk(ZEROBUS_SERVER_ENDPOINT, WORKSPACE_URL)
         
-        # Use JSON mode - protobuf mode requires C++ protobuf extensions not available in container
         logger.info(f"Initializing JSON stream for table: {FHIR_BUNDLE_TABLE_NAME}")
         table_props = TableProperties(FHIR_BUNDLE_TABLE_NAME)
         
-        # Create stream options with explicit configuration
         options = StreamConfigurationOptions(
-            record_type=RecordType.JSON,  # Use JSON mode instead of PROTO
-            max_inflight_records=10_000,
-            recovery=True,  # Enable durable writes
+            record_type=RecordType.JSON,
+            max_inflight_records=MAX_INFLIGHT_RECORDS,
+            recovery=True,
         )
         
-        logger.info(f"Stream configuration: record_type=JSON, max_inflight=10000, recovery=True")
+        logger.info(f"Stream configuration: record_type=JSON, max_inflight={MAX_INFLIGHT_RECORDS}, recovery=True")
         
-        # Open a long-lived JSON stream for this table
         zerobus_stream = zerobus_sdk.create_stream(
             CLIENT_ID,
             CLIENT_SECRET,
@@ -80,7 +73,6 @@ async def lifespan(app: FastAPI):
             options,
         )
         
-        # Store in app state (best practice for sharing across requests)
         app.state.zerobus_sdk = zerobus_sdk
         app.state.zerobus_stream = zerobus_stream
         
@@ -91,29 +83,20 @@ async def lifespan(app: FastAPI):
         app.state.zerobus_sdk = None
         app.state.zerobus_stream = None
     
-    # Create async HTTP client for optional additional validation (connection pooling)
-    app.state.http_client = httpx.AsyncClient(timeout=10.0)
-    
-    yield  # Application runs here
+    yield
     
     # Shutdown: Clean up resources
     logger.info("Shutting down FHIR Zerobus Ingest App...")
     
-    # Close Zerobus stream
     if hasattr(app.state, "zerobus_stream") and app.state.zerobus_stream is not None:
         try:
             app.state.zerobus_stream.close()
             logger.info("Zerobus stream closed successfully")
         except Exception as e:
             logger.error(f"Error closing Zerobus stream: {e}", exc_info=True)
-    
-    # Close HTTP client
-    if hasattr(app.state, "http_client"):
-        await app.state.http_client.aclose()
-        logger.info("HTTP client closed")
 
 
-# Initialize FastAPI app with lifespan
+# Initialize FastAPI app
 app = FastAPI(
     title="FHIR to Zerobus Ingest App",
     description="FastAPI application for ingesting FHIR bundles to Unity Catalog via Databricks Zerobus",
@@ -122,28 +105,23 @@ app = FastAPI(
 )
 
 
-# Add CORS middleware for external API calls
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict to specific origins
+    allow_origins=["*"],  # TODO: In production, restrict to specific origins
     allow_credentials=True,
     allow_methods=["POST", "GET"],
     allow_headers=["*"],
 )
 
 
-# Dependency: Authentication middleware for Databricks Apps
 async def verify_databricks_auth(request: Request) -> dict:
     """
     Validates Databricks authentication from headers forwarded by Databricks Apps Gateway.
     
-    Databricks Apps Gateway validates Bearer tokens at the edge and forwards user identity
-    via special headers instead of the original Authorization header:
+    The gateway validates Bearer tokens and forwards user identity via special headers:
     - x-forwarded-user: The authenticated user's identity (email)
-    - x-forwarded-access-token: The user's access token (optional, for user authorization)
-    
-    This function trusts the gateway's validation and extracts user information from
-    the forwarded headers. The gateway ensures only authenticated requests reach this app.
+    - x-forwarded-access-token: The user's access token (optional)
     
     Args:
         request: FastAPI request object containing forwarded headers
@@ -152,17 +130,15 @@ async def verify_databricks_auth(request: Request) -> dict:
         dict: User information containing userName and optional access token
         
     Raises:
-        HTTPException: If required headers are missing (app not accessed via Databricks Apps)
+        HTTPException: If required headers are missing
         
     References:
         - https://docs.databricks.com/dev-tools/databricks-apps/auth/
         - https://docs.databricks.com/dev-tools/databricks-apps/http-headers/
     """
-    # Extract forwarded authentication headers
     user = request.headers.get("x-forwarded-user")
     access_token = request.headers.get("x-forwarded-access-token")
     
-    # Validate that we have at least user identity
     if not user:
         logger.warning("Request received without x-forwarded-user header")
         raise HTTPException(
@@ -174,16 +150,14 @@ async def verify_databricks_auth(request: Request) -> dict:
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    logger.info(f"Successfully authenticated user from forwarded headers: {user}")
+    logger.info(f"Authenticated user: {user}")
     
-    # Return user info in compatible format
     return {
         "userName": user,
-        "accessToken": access_token,  # Optional: may be None
+        "accessToken": access_token,
     }
 
 
-# Health check endpoint (best practice for monitoring)
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health_check(request: Request):
     """
@@ -202,7 +176,6 @@ async def health_check(request: Request):
     )
 
 
-# Root endpoint
 @app.get("/", tags=["Info"])
 async def root():
     """Root endpoint with API information"""
@@ -218,7 +191,6 @@ async def root():
     }
 
 
-# Main ingestion endpoint
 @app.post(
     "/api/v1/ingest/fhir-bundle",
     response_model=IngestResponse,
@@ -250,7 +222,7 @@ async def ingest_fhir_bundle(
     - Recommended: < 1000 requests/minute per user
     
     **Response:**
-    - Returns bundle UUID and authenticated user information
+    - Returns bundle UUID and timestamp
     """
     # Check Zerobus stream availability
     if not hasattr(request.app.state, "zerobus_stream") or request.app.state.zerobus_stream is None:
@@ -260,14 +232,12 @@ async def ingest_fhir_bundle(
             detail="Zerobus stream not initialized. Service temporarily unavailable.",
         )
     
-    # Get raw JSON string and validate it's valid JSON
+    # Parse and validate JSON payload
     try:
-        # FastAPI: request.body() returns bytes, decode to string
         payload_bytes = await request.body()
         payload_text = payload_bytes.decode('utf-8')
-        # Parse and re-serialize to ensure clean JSON
         payload_obj = json.loads(payload_text)
-        # VARIANT columns MUST be JSON strings, not nested objects (per Zerobus docs)
+        # VARIANT columns require JSON strings, not nested objects
         payload_json_str = json.dumps(payload_obj, separators=(',', ':'))
     except json.JSONDecodeError as e:
         logger.warning(f"Invalid JSON payload received: {e}")
@@ -282,60 +252,34 @@ async def ingest_fhir_bundle(
             detail=f"Error reading request body: {str(e)}",
         )
     
-    # Generate unique bundle ID and metadata
+    # Generate unique bundle ID and timestamp
     bundle_uuid = str(uuid.uuid4())
-    user_email = user_info.get("userName", "unknown")
     event_timestamp = datetime.now(timezone.utc)
-    
-    # Convert to Unix epoch microseconds for TIMESTAMP column (Databricks TIMESTAMP uses microseconds!)
     timestamp_epoch_micros = int(event_timestamp.timestamp() * 1_000_000)
+    timestamp_str = event_timestamp.isoformat().replace('+00:00', 'Z')
     
-    # Format for response (ISO 8601 with Z suffix for human readability)
-    timestamp_str = event_timestamp.strftime('%Y-%m-%dT%H:%M:%SZ')
-    
-    # Build JSON record matching table schema
-    # VARIANT columns require JSON strings (not nested objects) per Zerobus SDK docs
+    # Build record matching table schema
     record = {
         "bundle_uuid": bundle_uuid,
-        "fhir": payload_json_str,  # JSON-encoded string for VARIANT column
-        "source_system": "FHIR to Zerobus Ingest App",
-        "event_timestamp": timestamp_epoch_micros  # Unix epoch MICROSECONDS (required for Databricks TIMESTAMP)
+        "fhir": payload_json_str,
+        "source_system": SOURCE_SYSTEM_NAME,
+        "event_timestamp": timestamp_epoch_micros
     }
     
-    # Log record for debugging (excluding large payload)
-    logger.info(f"Ingesting JSON record - UUID: {bundle_uuid}, Timestamp: {timestamp_str}")
+    logger.info(f"Ingesting bundle - UUID: {bundle_uuid}, User: {user_info.get('userName', 'unknown')}")
     
-    # Ingest to Zerobus with error handling
+    # Ingest to Zerobus
     try:
         zerobus_stream = request.app.state.zerobus_stream
         
-        # Debug: Validate what the SDK will send (as suggested in Zerobus docs)
-        try:
-            body = json.dumps(record)  # This is what SDK sends internally
-            parsed_back = json.loads(body)  # Verify full record is valid JSON
-            json.loads(record["fhir"])  # Verify FHIR string is valid JSON
-            
-            logger.info(f"Record validation passed. Body length: {len(body)}, FHIR length: {len(record['fhir'])}")
-            logger.info(f"Record structure: bundle_uuid={record.get('bundle_uuid')}, "
-                       f"source_system={record.get('source_system')}, "
-                       f"event_timestamp={record.get('event_timestamp')} (microseconds), "
-                       f"fhir_type={type(record.get('fhir')).__name__}")
-            
-            # Log serialized record sample for debugging
-            logger.info(f"Serialized record (first 200 chars): {body[:200]}...")
-        except Exception as validation_error:
-            logger.error(f"Record validation failed before sending to Zerobus: {validation_error}")
-            logger.error(f"Problematic record (first 500 chars): {json.dumps(record)[:500]}")
-            raise
+        # Validate record structure
+        json.dumps(record)  # Ensure full record is serializable
+        json.loads(record["fhir"])  # Ensure FHIR field is valid JSON
         
-        # Ingest record as Python dict (SDK handles JSON encoding internally)
-        # Only VARIANT column values should be pre-encoded JSON strings
         offset = zerobus_stream.ingest_record_offset(record)
-        
-        # Flush to ensure data is committed to table (not just queued)
         zerobus_stream.flush()
         
-        logger.info(f"Successfully ingested and flushed bundle {bundle_uuid} at offset {offset}")
+        logger.info(f"Successfully ingested bundle {bundle_uuid} at offset {offset}")
         
     except Exception as e:
         logger.error(f"Failed to write to Zerobus: {e}", exc_info=True)
@@ -344,7 +288,6 @@ async def ingest_fhir_bundle(
             detail=f"Failed to write to Zerobus: {str(e)}",
         )
     
-    # Return success response
     return IngestResponse(
         status="ok",
         bundle_uuid=bundle_uuid,
