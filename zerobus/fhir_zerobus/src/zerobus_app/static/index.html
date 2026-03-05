@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FHIR to Zerobus Ingest App</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #FF3621 0%, #E8330E 100%);
+            color: white;
+            padding: 40px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 20px rgba(255, 54, 33, 0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 20px;
+        }
+        
+        .header-content {
+            flex: 1;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.95;
+        }
+        
+        .header-logo {
+            flex-shrink: 0;
+        }
+        
+        .header-logo img {
+            height: 60px;
+            width: auto;
+            filter: brightness(0) invert(1);
+        }
+        
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            border: 1px solid #e1e4e8;
+        }
+        
+        .card h2 {
+            color: #2c3e50;
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .status-item {
+            padding: 20px;
+            border-radius: 8px;
+            border: 2px solid #e1e4e8;
+            background: #f8f9fa;
+        }
+        
+        .status-item h3 {
+            font-size: 0.9rem;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+        
+        .status-value {
+            font-size: 1.3rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .status-healthy {
+            color: #00A972;
+        }
+        
+        .status-error {
+            color: #E8330E;
+        }
+        
+        .status-loading {
+            color: #6c757d;
+        }
+        
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            line-height: 1.6;
+            margin: 15px 0;
+            white-space: pre;
+        }
+        
+        .code-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #e1e4e8;
+        }
+        
+        .code-title {
+            font-size: 0.85rem;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .copy-button {
+            background: #1473E6;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        
+        .copy-button:hover {
+            background: #0D66D0;
+            transform: translateY(-1px);
+        }
+        
+        .refresh-button {
+            background: #00A972;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: all 0.2s;
+            margin-top: 20px;
+        }
+        
+        .refresh-button:hover {
+            background: #008C5E;
+            transform: translateY(-1px);
+        }
+        
+        .refresh-button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .info-section {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-left: 4px solid #1473E6;
+            border-radius: 4px;
+        }
+        
+        .info-section h3 {
+            color: #1473E6;
+            font-size: 1.1rem;
+            margin-bottom: 10px;
+        }
+        
+        .info-section p {
+            color: #495057;
+            line-height: 1.6;
+            margin-bottom: 8px;
+        }
+        
+        .info-section ul {
+            margin-left: 20px;
+            color: #495057;
+            line-height: 1.8;
+        }
+        
+        .highlight {
+            color: #FF3621;
+            font-weight: 600;
+        }
+        
+        .endpoint-url {
+            color: #1473E6;
+            word-break: break-all;
+        }
+        
+        .error-box {
+            margin-top: 20px;
+            padding: 15px;
+            background: #FFE8E5;
+            border-radius: 8px;
+            color: #E8330E;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .loading {
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 30px;
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div id="root">
+        <div class="container">
+            <div class="header">
+                <div class="header-content">
+                    <h1>🏥 FHIR to Zerobus Ingest</h1>
+                    <p>Real-time streaming ingestion of HL7 FHIR Bundles to Unity Catalog</p>
+                </div>
+                <div class="header-logo">
+                    <img src="https://cdn.bfldr.com/9AYANS2F/at/b87x34rfnrgcfjvg93pt83x/databricks-symbol-light.svg?auto=webp" alt="Databricks Logo">
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2><span>📊</span> System Status</h2>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <h3>Application</h3>
+                        <div id="app-status" class="status-value status-loading">⏳ Checking...</div>
+                    </div>
+                    <div class="status-item">
+                        <h3>Zerobus Stream</h3>
+                        <div id="stream-status" class="status-value status-loading">⏳ Checking...</div>
+                    </div>
+                    <div class="status-item">
+                        <h3>Last Checked</h3>
+                        <div id="last-checked" class="status-value status-loading">N/A</div>
+                    </div>
+                </div>
+                <div id="error-container"></div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 20px;">
+                    <button id="refresh-btn" class="refresh-button" onclick="checkHealth()">🔄 Refresh Status</button>
+                    <a href="/health" style="text-decoration: none;">
+                        <button class="refresh-button" style="background: #1473E6; width: 100%;">📊 View Full Health Page</button>
+                    </a>
+                    <a href="/docs" target="_blank" style="text-decoration: none;">
+                        <button class="refresh-button" style="background: #FF8800; width: 100%;">📚 API Documentation</button>
+                    </a>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2><span>ℹ️</span> About This Application</h2>
+                <div class="info-section">
+                    <h3>What does this app do?</h3>
+                    <p>
+                        This FastAPI application provides a streaming ingestion endpoint for HL7 FHIR Bundles. 
+                        It uses <span class="highlight">Databricks Zerobus</span> to stream healthcare data 
+                        in real-time directly into <span class="highlight">Unity Catalog</span> tables.
+                    </p>
+                </div>
+                <div class="info-section">
+                    <h3>Key Features</h3>
+                    <ul>
+                        <li><strong>Real-time Streaming:</strong> Low-latency ingestion using Zerobus SDK</li>
+                        <li><strong>FHIR Native:</strong> Stores entire FHIR Bundles as JSON in VARIANT columns</li>
+                        <li><strong>Secure:</strong> Built-in Databricks authentication via Apps Gateway</li>
+                        <li><strong>Scalable:</strong> Handles up to 10,000 in-flight records with automatic recovery</li>
+                        <li><strong>Traceable:</strong> Each bundle gets a unique UUID and timestamp</li>
+                    </ul>
+                </div>
+                <div class="info-section">
+                    <h3>Architecture</h3>
+                    <p><strong>Ingestion Flow:</strong> FHIR Bundle → FastAPI → Zerobus Stream → Unity Catalog Table</p>
+                    <p>
+                        The application receives FHIR Bundles via REST API, validates the JSON payload, 
+                        assigns metadata (UUID, timestamp, source system), and streams the data to a Unity Catalog 
+                        table with a VARIANT column for flexible schema-on-read analytics.
+                    </p>
+                    <p style="margin-top: 10px;">
+                        <strong>Dual Authorization Model:</strong>
+                    </p>
+                    <ul style="margin-left: 20px;">
+                        <li><strong>User Authorization:</strong> The app validates incoming requests using the authenticated user's identity (forwarded by Apps Gateway)</li>
+                        <li><strong>App Authorization:</strong> The app uses its own service principal credentials (automatically injected by Databricks) to write to Zerobus and Unity Catalog</li>
+                        <li>This ensures all data ingestion is attributed to users while the app maintains secure, consistent write permissions</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2><span>⚡</span> About Databricks Zerobus</h2>
+                <div class="info-section">
+                    <h3>What is Zerobus?</h3>
+                    <p>
+                        <strong>Databricks Zerobus</strong> is a high-performance, low-latency streaming ingestion service 
+                        that enables real-time data writes directly to Unity Catalog Delta tables. It provides 
+                        microsecond-level latency for streaming data ingestion without the overhead of traditional 
+                        streaming infrastructure.
+                    </p>
+                </div>
+                
+                <div class="info-section">
+                    <h3>Key Capabilities</h3>
+                    <ul style="margin-left: 20px;">
+                        <li><strong>Ultra-low Latency:</strong> Microsecond-level acknowledgments for streaming data</li>
+                        <li><strong>Direct Table Writes:</strong> No intermediate storage or streaming clusters required</li>
+                        <li><strong>Schema Validation:</strong> Automatic validation against target table schema</li>
+                        <li><strong>Durable Writes:</strong> Data is acknowledged only after it's durably written to Delta</li>
+                        <li><strong>Multi-Protocol:</strong> Supports both gRPC (Protobuf) and HTTP (JSON) ingestion</li>
+                        <li><strong>VARIANT Support:</strong> Native support for semi-structured JSON data</li>
+                        <li><strong>Automatic Recovery:</strong> Built-in retry and error handling mechanisms</li>
+                    </ul>
+                </div>
+                
+                <div class="info-section">
+                    <h3>Architecture</h3>
+                    <p style="margin-bottom: 15px;">
+                        Zerobus acts as a high-performance bridge between streaming data sources and Unity Catalog tables, 
+                        providing a simplified ingestion path without complex streaming infrastructure:
+                    </p>
+                    <img src="https://docs.databricks.com/aws/en/assets/images/zerobus-ingest-overview-8f5f28f8bde8b3d3d985832ba4e4bf5b.png" 
+                         alt="Zerobus Architecture Diagram" 
+                         style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin: 15px 0;">
+                    <p style="margin-top: 15px;">
+                        <strong>How it works:</strong>
+                    </p>
+                    <ol style="margin-left: 20px; line-height: 1.8;">
+                        <li>Clients (like this FastAPI app) send data to the Zerobus server using SDK</li>
+                        <li>Zerobus validates data against the target Delta table schema</li>
+                        <li>Valid data is written durably to the Unity Catalog table</li>
+                        <li>Acknowledgment is sent back to the client confirming durable write</li>
+                    </ol>
+                </div>
+                
+                <div class="info-section">
+                    <h3>Why Zerobus for FHIR Ingestion?</h3>
+                    <p>
+                        This application leverages Zerobus to provide healthcare data ingestion with:
+                    </p>
+                    <ul style="margin-left: 20px;">
+                        <li><strong>Real-time Analytics:</strong> FHIR data available immediately for queries and dashboards</li>
+                        <li><strong>Simplified Architecture:</strong> No Kafka, no streaming jobs - just simple API calls</li>
+                        <li><strong>Schema Flexibility:</strong> VARIANT columns allow any FHIR resource structure</li>
+                        <li><strong>Guaranteed Delivery:</strong> Built-in acknowledgments ensure no data loss</li>
+                        <li><strong>Cost Efficiency:</strong> Pay only for what you ingest, no always-on infrastructure</li>
+                    </ul>
+                </div>
+                
+                <div class="info-section">
+                    <h3>Learn More</h3>
+                    <p>
+                        For comprehensive documentation about Databricks Zerobus, visit the 
+                        <a href="https://docs.databricks.com/aws/en/ingestion/zerobus-overview" target="_blank" style="color: #1473E6; font-weight: 600;">
+                            Zerobus Overview Documentation
+                        </a>
+                    </p>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2><span>🔌</span> API Endpoint Usage</h2>
+                <div class="info-section">
+                    <h3>Endpoint</h3>
+                    <p class="endpoint-url" id="endpoint-url">POST /api/v1/ingest/fhir-bundle</p>
+                </div>
+                <div class="info-section">
+                    <h3>Authentication & Authorization</h3>
+                    <p>
+                        This application uses <strong>Databricks Apps Gateway</strong> for OAuth2 authentication. 
+                        The gateway automatically handles user authentication and authorization.
+                    </p>
+                    <p><strong>Browser Access (Automatic):</strong></p>
+                    <ul style="margin-left: 20px; margin-bottom: 10px;">
+                        <li>When accessing via browser, authentication is handled automatically by the Apps Gateway</li>
+                        <li>Your Databricks session is validated, and your identity is forwarded to the app</li>
+                        <li>No manual authentication required - just navigate to the app URL</li>
+                    </ul>
+                    <p><strong>Programmatic Access (API Calls):</strong></p>
+                    <ul style="margin-left: 20px; margin-bottom: 10px;">
+                        <li>For cURL, Python scripts, or other programmatic access, include a Bearer token</li>
+                        <li>Use a Databricks personal access token or service principal OAuth token</li>
+                        <li>The Apps Gateway validates the token and forwards user identity via HTTP headers</li>
+                    </ul>
+                    <p style="font-family: monospace; background: #f8f9fa; padding: 10px; border-radius: 4px; margin-top: 10px;">
+                        Authorization: Bearer YOUR_DATABRICKS_TOKEN
+                    </p>
+                    <p style="margin-top: 10px;">
+                        <strong>How it works:</strong> The Apps Gateway intercepts all requests, validates OAuth2 credentials, 
+                        and forwards authenticated user information to the app via <code>x-forwarded-user</code>, 
+                        <code>x-forwarded-email</code>, and <code>x-forwarded-access-token</code> headers. 
+                        The app uses these headers to authorize requests and act on behalf of the authenticated user.
+                    </p>
+                </div>
+                <div class="info-section">
+                    <h3>Request Requirements</h3>
+                    <ul>
+                        <li><strong>Content-Type:</strong> application/json</li>
+                        <li><strong>Body:</strong> Valid JSON (typically a FHIR Bundle, but any JSON is accepted)</li>
+                        <li><strong>Max Size:</strong> Recommended under 5MB per request</li>
+                    </ul>
+                </div>
+                <div class="info-section">
+                    <h3>Response Format</h3>
+                    <p>On success (HTTP 200), you'll receive:</p>
+                    <div class="code-block">{
+  "status": "ok",
+  "bundle_uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2024-01-15T10:30:00Z"
+}</div>
+                </div>
+                
+                <div class="info-section" style="margin-top: 30px;">
+                    <h3>Code Examples for Programmatic Access</h3>
+                    <p>
+                        Use these examples when calling the API from scripts, CI/CD pipelines, or external systems. 
+                        Replace <code>YOUR_DATABRICKS_TOKEN</code> with a valid Databricks personal access token 
+                        or OAuth token from a service principal.
+                    </p>
+                    <p style="margin-top: 8px;">
+                        <strong>Generate a token:</strong> Settings → Developer → Access tokens
+                    </p>
+                </div>
+                
+                <div style="margin-top: 20px;">
+                    <div class="code-header">
+                        <span class="code-title">cURL Example</span>
+                        <button class="copy-button" onclick="copyCurl()">📋 Copy</button>
+                    </div>
+                    <div class="code-block" id="curl-example"></div>
+                </div>
+                
+                <div style="margin-top: 30px;">
+                    <div class="code-header">
+                        <span class="code-title">Python Example</span>
+                        <button class="copy-button" onclick="copyPython()">📋 Copy</button>
+                    </div>
+                    <div class="code-block" id="python-example"></div>
+                </div>
+                
+                <div class="info-section" style="margin-top: 30px;">
+                    <h3>Additional Resources</h3>
+                    <p>
+                        <strong>Interactive API Docs:</strong> Visit 
+                        <a href="/docs" target="_blank" style="color: #1473E6;">/docs</a>
+                        for Swagger UI documentation
+                    </p>
+                    <p>
+                        <strong>Health Check:</strong> Monitor endpoint availability at 
+                        <a href="/health" target="_blank" style="color: #1473E6;">/health</a>
+                    </p>
+                    <p>
+                        <strong>Authentication Guide:</strong> Learn about Databricks Apps OAuth2 authentication at 
+                        <a href="https://docs.databricks.com/aws/en/dev-tools/databricks-apps/auth/" target="_blank" style="color: #1473E6;">Databricks Apps Auth Docs</a>
+                    </p>
+                </div>
+            </div>
+            
+            <div class="footer">
+                <p>Powered by Databricks | FastAPI | Zerobus SDK</p>
+                <p><a href="mailto:matthew.giglia@databricks.com" style="color: #1473E6; text-decoration: none;">Created 2026</a> | FHIR to Zerobus Ingest App v1.0.0</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Get base URL
+        const baseUrl = window.location.origin;
+        
+        // Update endpoint URL display
+        document.getElementById('endpoint-url').textContent = 'POST ' + baseUrl + '/api/v1/ingest/fhir-bundle';
+        
+        // Generate code examples
+        const curlExample = `curl -X POST "${baseUrl}/api/v1/ingest/fhir-bundle" \\
+  -H "Authorization: Bearer YOUR_DATABRICKS_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "resourceType": "Bundle",
+    "type": "transaction",
+    "entry": [{
+      "resource": {
+        "resourceType": "Patient",
+        "id": "example",
+        "name": [{"family": "Doe", "given": ["John"]}]
+      }
+    }]
+  }'`;
+        
+        const pythonExample = `import requests
+import json
+
+# Your Databricks personal access token
+token = "YOUR_DATABRICKS_TOKEN"
+
+# FHIR Bundle payload
+bundle = {
+    "resourceType": "Bundle",
+    "type": "transaction",
+    "entry": [{
+        "resource": {
+            "resourceType": "Patient",
+            "id": "example",
+            "name": [{"family": "Doe", "given": ["John"]}]
+        }
+    }]
+}
+
+# Send POST request
+response = requests.post(
+    "${baseUrl}/api/v1/ingest/fhir-bundle",
+    headers={
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    },
+    json=bundle
+)
+
+print(f"Status: {response.status_code}")
+print(f"Response: {response.json()}")`;
+        
+        document.getElementById('curl-example').textContent = curlExample;
+        document.getElementById('python-example').textContent = pythonExample;
+        
+        // Health check function
+        async function checkHealth() {
+            const appStatus = document.getElementById('app-status');
+            const streamStatus = document.getElementById('stream-status');
+            const lastChecked = document.getElementById('last-checked');
+            const errorContainer = document.getElementById('error-container');
+            const refreshBtn = document.getElementById('refresh-btn');
+            
+            // Set loading state
+            appStatus.className = 'status-value loading';
+            appStatus.textContent = '⏳ Checking...';
+            streamStatus.className = 'status-value loading';
+            streamStatus.textContent = '⏳ Checking...';
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = '⏳ Checking...';
+            errorContainer.innerHTML = '';
+            
+            try {
+                const response = await fetch('/health/json');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                
+                // Update app status
+                appStatus.className = 'status-value status-healthy';
+                appStatus.textContent = '✓ Healthy';
+                
+                // Update stream status
+                if (data.zerobus_stream === 'healthy') {
+                    streamStatus.className = 'status-value status-healthy';
+                    streamStatus.textContent = '✓ Connected';
+                } else {
+                    streamStatus.className = 'status-value status-error';
+                    streamStatus.textContent = '✗ Disconnected';
+                }
+                
+                // Update timestamp
+                const now = new Date();
+                lastChecked.className = 'status-value status-loading';
+                lastChecked.textContent = now.toLocaleTimeString();
+                
+            } catch (err) {
+                appStatus.className = 'status-value status-error';
+                appStatus.textContent = '✗ Unavailable';
+                streamStatus.className = 'status-value status-error';
+                streamStatus.textContent = '✗ Unknown';
+                
+                errorContainer.innerHTML = '<div class="error-box"><strong>Error:</strong> ' + err.message + '</div>';
+            } finally {
+                refreshBtn.disabled = false;
+                refreshBtn.textContent = '🔄 Refresh Status';
+            }
+        }
+        
+        // Copy functions
+        function copyCurl() {
+            navigator.clipboard.writeText(curlExample);
+            alert('cURL example copied to clipboard!');
+        }
+        
+        function copyPython() {
+            navigator.clipboard.writeText(pythonExample);
+            alert('Python example copied to clipboard!');
+        }
+        
+        // Initial health check
+        checkHealth();
+        
+        // Auto-refresh every 27 minutes
+        setInterval(checkHealth, 1620000);
+    </script>
+</body>
+</html>

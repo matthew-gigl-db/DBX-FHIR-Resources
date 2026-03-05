@@ -4,10 +4,14 @@ import json
 import logging
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, Request, HTTPException, Depends, status
+from fastapi import FastAPI, Request, HTTPException, Depends, status, Body
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from typing import Any
 
 from zerobus.sdk.sync import ZerobusSdk
 from zerobus.sdk.shared import RecordType, StreamConfigurationOptions, TableProperties
@@ -115,6 +119,13 @@ app.add_middleware(
 )
 
 
+# Mount static files directory for React frontend
+static_dir = Path(__file__).parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    logger.info(f"Mounted static files directory: {static_dir}")
+
+
 async def verify_databricks_auth(request: Request) -> dict:
     """
     Validates Databricks authentication from headers forwarded by Databricks Apps Gateway.
@@ -158,11 +169,25 @@ async def verify_databricks_auth(request: Request) -> dict:
     }
 
 
-@app.get("/health", response_model=HealthResponse, tags=["Health"])
-async def health_check(request: Request):
+@app.get("/health", tags=["Health"])
+async def health_check_page():
+    """
+    Health status page - displays a professional health dashboard.
+    For programmatic JSON access, use /health/json instead.
+    """
+    static_health = Path(__file__).parent / "static" / "health.html"
+    if static_health.exists():
+        return FileResponse(str(static_health))
+    
+    # Fallback if HTML not available
+    return {"error": "Health page not found. Use /health/json for JSON response."}
+
+
+@app.get("/health/json", response_model=HealthResponse, tags=["Health"])
+async def health_check_json(request: Request):
     """
     Health check endpoint for monitoring and load balancers.
-    Returns the status of the application and Zerobus stream.
+    Returns the status of the application and Zerobus stream in JSON format.
     """
     zerobus_status = "healthy" if (
         hasattr(request.app.state, "zerobus_stream") 
@@ -178,7 +203,12 @@ async def health_check(request: Request):
 
 @app.get("/", tags=["Info"])
 async def root():
-    """Root endpoint with API information"""
+    """Root endpoint serving the React frontend"""
+    static_index = Path(__file__).parent / "static" / "index.html"
+    if static_index.exists():
+        return FileResponse(str(static_index))
+    
+    # Fallback to API info if frontend not available
     return {
         "name": app.title,
         "version": app.version,
@@ -201,6 +231,27 @@ async def root():
 )
 async def ingest_fhir_bundle(
     request: Request,
+    payload: Any = Body(
+        ...,
+        example={
+            "resourceType": "Bundle",
+            "type": "transaction",
+            "entry": [
+                {
+                    "resource": {
+                        "resourceType": "Patient",
+                        "id": "example",
+                        "name": [
+                            {
+                                "family": "Doe",
+                                "given": ["John"]
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    ),
     user_info: dict = Depends(verify_databricks_auth),
 ):
     """
@@ -234,22 +285,14 @@ async def ingest_fhir_bundle(
     
     # Parse and validate JSON payload
     try:
-        payload_bytes = await request.body()
-        payload_text = payload_bytes.decode('utf-8')
-        payload_obj = json.loads(payload_text)
+        # Payload is already parsed by FastAPI Body
         # VARIANT columns require JSON strings, not nested objects
-        payload_json_str = json.dumps(payload_obj, separators=(',', ':'))
-    except json.JSONDecodeError as e:
-        logger.warning(f"Invalid JSON payload received: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid JSON payload: {str(e)}",
-        )
+        payload_json_str = json.dumps(payload, separators=(',', ':'))
     except Exception as e:
-        logger.warning(f"Error reading request body: {e}")
+        logger.warning(f"Error serializing payload: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Error reading request body: {str(e)}",
+            detail=f"Error serializing payload: {str(e)}",
         )
     
     # Generate unique bundle ID and timestamp
