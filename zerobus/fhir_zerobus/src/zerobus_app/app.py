@@ -330,7 +330,10 @@ async def ingest_fhir_bundle(
         # Only VARIANT column values should be pre-encoded JSON strings
         offset = zerobus_stream.ingest_record_offset(record)
         
-        logger.info(f"Successfully ingested bundle {bundle_uuid} at offset {offset}")
+        # Flush to ensure data is committed to table (not just queued)
+        zerobus_stream.flush()
+        
+        logger.info(f"Successfully ingested and flushed bundle {bundle_uuid} at offset {offset}")
         
     except Exception as e:
         logger.error(f"Failed to write to Zerobus: {e}", exc_info=True)
