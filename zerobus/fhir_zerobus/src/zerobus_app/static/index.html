@@ -283,10 +283,13 @@
                     </div>
                 </div>
                 <div id="error-container"></div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 20px;">
                     <button id="refresh-btn" class="refresh-button" onclick="checkHealth()">🔄 Refresh Status</button>
                     <a href="/health" style="text-decoration: none;">
                         <button class="refresh-button" style="background: #1473E6; width: 100%;">📊 View Full Health Page</button>
+                    </a>
+                    <a href="/docs" target="_blank" style="text-decoration: none;">
+                        <button class="refresh-button" style="background: #FF8800; width: 100%;">📚 API Documentation</button>
                     </a>
                 </div>
             </div>
@@ -632,8 +635,8 @@ print(f"Response: {response.json()}")`;
         // Initial health check
         checkHealth();
         
-        // Auto-refresh every 10 minutes
-        setInterval(checkHealth, 600000);
+        // Auto-refresh every 27 minutes
+        setInterval(checkHealth, 1620000);
     </script>
 </body>
 </html>
