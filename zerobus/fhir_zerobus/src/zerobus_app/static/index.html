@@ -4,9 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FHIR to Zerobus Ingest App</title>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -117,6 +114,7 @@
             font-size: 0.9rem;
             line-height: 1.6;
             margin: 15px 0;
+            white-space: pre;
         }
         
         .code-header {
@@ -173,6 +171,7 @@
         .refresh-button:disabled {
             background: #6c757d;
             cursor: not-allowed;
+            transform: none;
         }
         
         .info-section {
@@ -211,6 +210,14 @@
             word-break: break-all;
         }
         
+        .error-box {
+            margin-top: 20px;
+            padding: 15px;
+            background: #FFE8E5;
+            border-radius: 8px;
+            color: #E8330E;
+        }
+        
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
@@ -229,41 +236,146 @@
     </style>
 </head>
 <body>
-    <div id="root"></div>
-    <script type="text/babel">
-        const { useState, useEffect } = React;
-        function App() {
-            const [health, setHealth] = useState(null);
-            const [loading, setLoading] = useState(true);
-            const [error, setError] = useState(null);
-            const [lastChecked, setLastChecked] = useState(null);
-            const fetchHealth = async () => {
-                setLoading(true);
-                setError(null);
-                try {
-                    const response = await fetch('/health');
-                    if (!response.ok) throw new Error(\`HTTP \${response.status}: \${response.statusText}\`);
-                    const data = await response.json();
-                    setHealth(data);
-                    setLastChecked(new Date());
-                } catch (err) {
-                    setError(err.message);
-                    setHealth(null);
-                } finally {
-                    setLoading(false);
-                }
-            };
-            useEffect(() => {
-                fetchHealth();
-                const interval = setInterval(fetchHealth, 30000);
-                return () => clearInterval(interval);
-            }, []);
-            const copyToClipboard = (text) => {
-                navigator.clipboard.writeText(text);
-            };
-            const curlExample = \`curl -X POST "\${window.location.origin}/api/v1/ingest/fhir-bundle" \\\\
-  -H "Authorization: Bearer YOUR_DATABRICKS_TOKEN" \\\\
-  -H "Content-Type: application/json" \\\\
+    <div id="root">
+        <div class="container">
+            <div class="header">
+                <h1>🏥 FHIR to Zerobus Ingest</h1>
+                <p>Real-time streaming ingestion of HL7 FHIR Bundles to Unity Catalog</p>
+            </div>
+            
+            <div class="card">
+                <h2><span>📊</span> System Status</h2>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <h3>Application</h3>
+                        <div id="app-status" class="status-value status-loading">⏳ Checking...</div>
+                    </div>
+                    <div class="status-item">
+                        <h3>Zerobus Stream</h3>
+                        <div id="stream-status" class="status-value status-loading">⏳ Checking...</div>
+                    </div>
+                    <div class="status-item">
+                        <h3>Last Checked</h3>
+                        <div id="last-checked" class="status-value status-loading">N/A</div>
+                    </div>
+                </div>
+                <div id="error-container"></div>
+                <button id="refresh-btn" class="refresh-button" onclick="checkHealth()">🔄 Refresh Status</button>
+            </div>
+            
+            <div class="card">
+                <h2><span>ℹ️</span> About This Application</h2>
+                <div class="info-section">
+                    <h3>What does this app do?</h3>
+                    <p>
+                        This FastAPI application provides a streaming ingestion endpoint for HL7 FHIR Bundles. 
+                        It uses <span class="highlight">Databricks Zerobus</span> to stream healthcare data 
+                        in real-time directly into <span class="highlight">Unity Catalog</span> tables.
+                    </p>
+                </div>
+                <div class="info-section">
+                    <h3>Key Features</h3>
+                    <ul>
+                        <li><strong>Real-time Streaming:</strong> Low-latency ingestion using Zerobus SDK</li>
+                        <li><strong>FHIR Native:</strong> Stores entire FHIR Bundles as JSON in VARIANT columns</li>
+                        <li><strong>Secure:</strong> Built-in Databricks authentication via Apps Gateway</li>
+                        <li><strong>Scalable:</strong> Handles up to 10,000 in-flight records with automatic recovery</li>
+                        <li><strong>Traceable:</strong> Each bundle gets a unique UUID and timestamp</li>
+                    </ul>
+                </div>
+                <div class="info-section">
+                    <h3>Architecture</h3>
+                    <p><strong>Ingestion Flow:</strong> FHIR Bundle → FastAPI → Zerobus Stream → Unity Catalog Table</p>
+                    <p>
+                        The application receives FHIR Bundles via REST API, validates the JSON payload, 
+                        assigns metadata (UUID, timestamp, source system), and streams the data to a Unity Catalog 
+                        table with a VARIANT column for flexible schema-on-read analytics.
+                    </p>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2><span>🔌</span> API Endpoint Usage</h2>
+                <div class="info-section">
+                    <h3>Endpoint</h3>
+                    <p class="endpoint-url" id="endpoint-url">POST /api/v1/ingest/fhir-bundle</p>
+                </div>
+                <div class="info-section">
+                    <h3>Authentication</h3>
+                    <p>
+                        This app requires authentication via <strong>Databricks Apps Gateway</strong>. 
+                        Include your Databricks personal access token or service principal credentials in the Authorization header:
+                    </p>
+                    <p style="font-family: monospace; background: #f8f9fa; padding: 10px; border-radius: 4px; margin-top: 10px;">
+                        Authorization: Bearer YOUR_DATABRICKS_TOKEN
+                    </p>
+                </div>
+                <div class="info-section">
+                    <h3>Request Requirements</h3>
+                    <ul>
+                        <li><strong>Content-Type:</strong> application/json</li>
+                        <li><strong>Body:</strong> Valid JSON (typically a FHIR Bundle, but any JSON is accepted)</li>
+                        <li><strong>Max Size:</strong> Recommended under 5MB per request</li>
+                    </ul>
+                </div>
+                <div class="info-section">
+                    <h3>Response Format</h3>
+                    <p>On success (HTTP 200), you'll receive:</p>
+                    <div class="code-block">{
+  "status": "ok",
+  "bundle_uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2024-01-15T10:30:00Z"
+}</div>
+                </div>
+                
+                <div style="margin-top: 30px;">
+                    <div class="code-header">
+                        <span class="code-title">cURL Example</span>
+                        <button class="copy-button" onclick="copyCurl()">📋 Copy</button>
+                    </div>
+                    <div class="code-block" id="curl-example"></div>
+                </div>
+                
+                <div style="margin-top: 30px;">
+                    <div class="code-header">
+                        <span class="code-title">Python Example</span>
+                        <button class="copy-button" onclick="copyPython()">📋 Copy</button>
+                    </div>
+                    <div class="code-block" id="python-example"></div>
+                </div>
+                
+                <div class="info-section" style="margin-top: 30px;">
+                    <h3>Additional Resources</h3>
+                    <p>
+                        <strong>Interactive API Docs:</strong> Visit 
+                        <a href="/docs" target="_blank" style="color: #1473E6;">/docs</a>
+                        for Swagger UI documentation
+                    </p>
+                    <p>
+                        <strong>Health Check:</strong> Monitor endpoint availability at 
+                        <a href="/health" target="_blank" style="color: #1473E6;">/health</a>
+                    </p>
+                </div>
+            </div>
+            
+            <div class="footer">
+                <p>Powered by Databricks | FastAPI | Zerobus SDK</p>
+                <p>© 2024 FHIR to Zerobus Ingest App v1.0.0</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Get base URL
+        const baseUrl = window.location.origin;
+        
+        // Update endpoint URL display
+        document.getElementById('endpoint-url').textContent = 'POST ' + baseUrl + '/api/v1/ingest/fhir-bundle';
+        
+        // Generate code examples
+        const curlExample = `curl -X POST "${baseUrl}/api/v1/ingest/fhir-bundle" \\
+  -H "Authorization: Bearer YOUR_DATABRICKS_TOKEN" \\
+  -H "Content-Type: application/json" \\
   -d '{
     "resourceType": "Bundle",
     "type": "transaction",
@@ -274,12 +386,15 @@
         "name": [{"family": "Doe", "given": ["John"]}]
       }
     }]
-  }'\`;
-            const pythonExample = \`import requests
+  }'`;
+        
+        const pythonExample = `import requests
 import json
 
+# Your Databricks personal access token
 token = "YOUR_DATABRICKS_TOKEN"
 
+# FHIR Bundle payload
 bundle = {
     "resourceType": "Bundle",
     "type": "transaction",
@@ -292,134 +407,93 @@ bundle = {
     }]
 }
 
+# Send POST request
 response = requests.post(
-    "\${window.location.origin}/api/v1/ingest/fhir-bundle",
-    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+    "${baseUrl}/api/v1/ingest/fhir-bundle",
+    headers={
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    },
     json=bundle
 )
 
 print(f"Status: {response.status_code}")
-print(f"Response: {response.json()}")\`;
-            return (
-                <div className="container">
-                    <div className="header">
-                        <h1>🏥 FHIR to Zerobus Ingest</h1>
-                        <p>Real-time streaming ingestion of HL7 FHIR Bundles to Unity Catalog</p>
-                    </div>
-                    <div className="card">
-                        <h2><span>📊</span> System Status</h2>
-                        <div className="status-grid">
-                            <div className="status-item">
-                                <h3>Application</h3>
-                                <div className={\`status-value \${loading ? 'loading' : health ? 'status-healthy' : 'status-error'}\`}>
-                                    {loading ? '⏳ Checking...' : health ? '✓ Healthy' : '✗ Unavailable'}
-                                </div>
-                            </div>
-                            <div className="status-item">
-                                <h3>Zerobus Stream</h3>
-                                <div className={\`status-value \${loading ? 'loading' : health?.zerobus_stream === 'healthy' ? 'status-healthy' : 'status-error'}\`}>
-                                    {loading ? '⏳ Checking...' : health?.zerobus_stream === 'healthy' ? '✓ Connected' : '✗ Disconnected'}
-                                </div>
-                            </div>
-                            <div className="status-item">
-                                <h3>Last Checked</h3>
-                                <div className="status-value status-loading">
-                                    {lastChecked ? lastChecked.toLocaleTimeString() : 'N/A'}
-                                </div>
-                            </div>
-                        </div>
-                        {error && (
-                            <div style={{marginTop: '20px', padding: '15px', background: '#FFE8E5', borderRadius: '8px', color: '#E8330E'}}>
-                                <strong>Error:</strong> {error}
-                            </div>
-                        )}
-                        <button className="refresh-button" onClick={fetchHealth} disabled={loading}>
-                            {loading ? '⏳ Checking...' : '🔄 Refresh Status'}
-                        </button>
-                    </div>
-                    <div className="card">
-                        <h2><span>ℹ️</span> About This Application</h2>
-                        <div className="info-section">
-                            <h3>What does this app do?</h3>
-                            <p>This FastAPI application provides a streaming ingestion endpoint for HL7 FHIR Bundles. It uses <span className="highlight">Databricks Zerobus</span> to stream healthcare data in real-time directly into <span className="highlight">Unity Catalog</span> tables.</p>
-                        </div>
-                        <div className="info-section">
-                            <h3>Key Features</h3>
-                            <ul>
-                                <li><strong>Real-time Streaming:</strong> Low-latency ingestion using Zerobus SDK</li>
-                                <li><strong>FHIR Native:</strong> Stores entire FHIR Bundles as JSON in VARIANT columns</li>
-                                <li><strong>Secure:</strong> Built-in Databricks authentication via Apps Gateway</li>
-                                <li><strong>Scalable:</strong> Handles up to 10,000 in-flight records with automatic recovery</li>
-                                <li><strong>Traceable:</strong> Each bundle gets a unique UUID and timestamp</li>
-                            </ul>
-                        </div>
-                        <div className="info-section">
-                            <h3>Architecture</h3>
-                            <p><strong>Ingestion Flow:</strong> FHIR Bundle → FastAPI → Zerobus Stream → Unity Catalog Table</p>
-                            <p>The application receives FHIR Bundles via REST API, validates the JSON payload, assigns metadata (UUID, timestamp, source system), and streams the data to a Unity Catalog table with a VARIANT column for flexible schema-on-read analytics.</p>
-                        </div>
-                    </div>
-                    <div className="card">
-                        <h2><span>🔌</span> API Endpoint Usage</h2>
-                        <div className="info-section">
-                            <h3>Endpoint</h3>
-                            <p className="endpoint-url">POST {window.location.origin}/api/v1/ingest/fhir-bundle</p>
-                        </div>
-                        <div className="info-section">
-                            <h3>Authentication</h3>
-                            <p>This app requires authentication via <strong>Databricks Apps Gateway</strong>. Include your Databricks personal access token or service principal credentials in the Authorization header:</p>
-                            <p style={{fontFamily: 'monospace', background: '#f8f9fa', padding: '10px', borderRadius: '4px', marginTop: '10px'}}>
-                                Authorization: Bearer YOUR_DATABRICKS_TOKEN
-                            </p>
-                        </div>
-                        <div className="info-section">
-                            <h3>Request Requirements</h3>
-                            <ul>
-                                <li><strong>Content-Type:</strong> application/json</li>
-                                <li><strong>Body:</strong> Valid JSON (typically a FHIR Bundle, but any JSON is accepted)</li>
-                                <li><strong>Max Size:</strong> Recommended under 5MB per request</li>
-                            </ul>
-                        </div>
-                        <div className="info-section">
-                            <h3>Response Format</h3>
-                            <p>On success (HTTP 200), you'll receive:</p>
-                            <div className="code-block" style={{marginTop: '10px'}}>
-{\`{
-  "status": "ok",
-  "bundle_uuid": "550e8400-e29b-41d4-a716-446655440000",
-  "timestamp": "2024-01-15T10:30:00Z"
-}\`}
-                            </div>
-                        </div>
-                        <div style={{marginTop: '30px'}}>
-                            <div className="code-header">
-                                <span className="code-title">cURL Example</span>
-                                <button className="copy-button" onClick={() => copyToClipboard(curlExample)}>📋 Copy</button>
-                            </div>
-                            <div className="code-block"><pre>{curlExample}</pre></div>
-                        </div>
-                        <div style={{marginTop: '30px'}}>
-                            <div className="code-header">
-                                <span className="code-title">Python Example</span>
-                                <button className="copy-button" onClick={() => copyToClipboard(pythonExample)}>📋 Copy</button>
-                            </div>
-                            <div className="code-block"><pre>{pythonExample}</pre></div>
-                        </div>
-                        <div className="info-section" style={{marginTop: '30px'}}>
-                            <h3>Additional Resources</h3>
-                            <p><strong>Interactive API Docs:</strong> Visit <a href="/docs" target="_blank" style={{color: '#1473E6'}}>{window.location.origin}/docs</a> for Swagger UI documentation</p>
-                            <p><strong>Health Check:</strong> Monitor endpoint availability at <a href="/health" target="_blank" style={{color: '#1473E6'}}>{window.location.origin}/health</a></p>
-                        </div>
-                    </div>
-                    <div className="footer">
-                        <p>Powered by Databricks | FastAPI | Zerobus SDK</p>
-                        <p>© 2024 FHIR to Zerobus Ingest App v1.0.0</p>
-                    </div>
-                </div>
-            );
+print(f"Response: {response.json()}")`;
+        
+        document.getElementById('curl-example').textContent = curlExample;
+        document.getElementById('python-example').textContent = pythonExample;
+        
+        // Health check function
+        async function checkHealth() {
+            const appStatus = document.getElementById('app-status');
+            const streamStatus = document.getElementById('stream-status');
+            const lastChecked = document.getElementById('last-checked');
+            const errorContainer = document.getElementById('error-container');
+            const refreshBtn = document.getElementById('refresh-btn');
+            
+            // Set loading state
+            appStatus.className = 'status-value loading';
+            appStatus.textContent = '⏳ Checking...';
+            streamStatus.className = 'status-value loading';
+            streamStatus.textContent = '⏳ Checking...';
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = '⏳ Checking...';
+            errorContainer.innerHTML = '';
+            
+            try {
+                const response = await fetch('/health');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                
+                // Update app status
+                appStatus.className = 'status-value status-healthy';
+                appStatus.textContent = '✓ Healthy';
+                
+                // Update stream status
+                if (data.zerobus_stream === 'healthy') {
+                    streamStatus.className = 'status-value status-healthy';
+                    streamStatus.textContent = '✓ Connected';
+                } else {
+                    streamStatus.className = 'status-value status-error';
+                    streamStatus.textContent = '✗ Disconnected';
+                }
+                
+                // Update timestamp
+                const now = new Date();
+                lastChecked.className = 'status-value status-loading';
+                lastChecked.textContent = now.toLocaleTimeString();
+                
+            } catch (err) {
+                appStatus.className = 'status-value status-error';
+                appStatus.textContent = '✗ Unavailable';
+                streamStatus.className = 'status-value status-error';
+                streamStatus.textContent = '✗ Unknown';
+                
+                errorContainer.innerHTML = '<div class="error-box"><strong>Error:</strong> ' + err.message + '</div>';
+            } finally {
+                refreshBtn.disabled = false;
+                refreshBtn.textContent = '🔄 Refresh Status';
+            }
         }
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        
+        // Copy functions
+        function copyCurl() {
+            navigator.clipboard.writeText(curlExample);
+            alert('cURL example copied to clipboard!');
+        }
+        
+        function copyPython() {
+            navigator.clipboard.writeText(pythonExample);
+            alert('Python example copied to clipboard!');
+        }
+        
+        // Initial health check
+        checkHealth();
+        
+        // Auto-refresh every 30 seconds
+        setInterval(checkHealth, 30000);
     </script>
 </body>
 </html>
