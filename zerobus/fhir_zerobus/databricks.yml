@@ -135,8 +135,8 @@ targets:
     permissions:
       - user_name: matthew.giglia@databricks.com
         level: CAN_MANAGE
-
-  # The 'prod' target, used for production deployment.
+  
+  # Used for the HIMSS 2026 Booth Demos
   himss2026:
     mode: production
     presets:
