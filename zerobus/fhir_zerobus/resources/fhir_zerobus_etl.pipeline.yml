@@ -3,7 +3,7 @@
 resources:
   pipelines:
     fhir_zerobus_etl:
-      name: fhir_zerobus_etl
+      name: FHIR Zerobus ETL
       catalog: ${var.catalog}
       schema: ${var.schema}
       serverless: true
