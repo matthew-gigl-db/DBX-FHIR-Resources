@@ -133,11 +133,14 @@ def extract_request_headers(request: Request) -> dict[str, Optional[str]]:
     These headers are forwarded by the Databricks Apps reverse proxy and contain
     information about the original request and authenticated user.
     
+    The x-forwarded-access-token is intentionally excluded from the returned dictionary
+    for security reasons (it's used for authentication but not stored in the table).
+    
     Args:
         request: FastAPI request object containing forwarded headers
         
     Returns:
-        dict: Dictionary containing all available forwarded headers
+        dict: Dictionary containing all available forwarded headers (excluding access token)
         
     References:
         - https://docs.databricks.com/aws/en/dev-tools/databricks-apps/http-headers/
@@ -147,13 +150,13 @@ def extract_request_headers(request: Request) -> dict[str, Optional[str]]:
         "x_forwarded_preferred_username": request.headers.get("x-forwarded-preferred-username"),
         "x_forwarded_user": request.headers.get("x-forwarded-user"),
         "x_forwarded_email": request.headers.get("x-forwarded-email"),
-        "x_forwarded_access_token": request.headers.get("x-forwarded-access-token"),
+        # x_forwarded_access_token intentionally excluded for security
         "x_real_ip": request.headers.get("x-real-ip"),
         "x_request_id": request.headers.get("x-request-id"),
     }
     
-    # Log available headers for debugging (excluding sensitive token)
-    available_headers = {k: v for k, v in headers.items() if v is not None and k != "x_forwarded_access_token"}
+    # Log available headers for debugging
+    available_headers = {k: v for k, v in headers.items() if v is not None}
     logger.debug(f"Extracted headers: {available_headers}")
     
     return headers
@@ -300,9 +303,10 @@ async def ingest_fhir_bundle(
     - `x_forwarded_user`: User identifier (required for auth)
     - `x_forwarded_email`: User email address
     - `x_forwarded_preferred_username`: Username from IdP
-    - `x_forwarded_access_token`: Access token (stored but excluded from logs)
     - `x_real_ip`: Client IP address
     - `x_request_id`: Unique request UUID
+    
+    **Note:** The access token is used for authentication but NOT stored in the table for security.
     
     Query request details with SQL: `SELECT request_detail:x_forwarded_user::string FROM table`
     
@@ -341,7 +345,7 @@ async def ingest_fhir_bundle(
             detail=f"Error serializing payload: {str(e)}",
         )
     
-    # Extract all forwarded headers for request_detail
+    # Extract all forwarded headers for request_detail (excluding access token)
     request_headers = extract_request_headers(request)
     request_detail_json_str = json.dumps(request_headers, separators=(',', ':'))
     
