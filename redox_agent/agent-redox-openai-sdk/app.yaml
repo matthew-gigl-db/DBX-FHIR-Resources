@@ -14,3 +14,11 @@ env:
     value: "300"
   - name: MLFLOW_EXPERIMENT_ID
     valueFrom: "experiment"
+  # Redox MCP configuration
+  # REDOX_MCP_APP_NAME is set statically here for local dev; overridden by databricks.yml at deploy time
+  - name: REDOX_MCP_APP_NAME
+    value: "mcp-redox"
+  # REDOX_MCP_URL is injected from the 'redox_mcp_url' secret resource at deploy time
+  # For local dev, set REDOX_MCP_URL in your .env file instead
+  - name: REDOX_MCP_URL
+    valueFrom: "redox_mcp_url"

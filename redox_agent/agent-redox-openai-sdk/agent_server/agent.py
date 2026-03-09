@@ -1,3 +1,4 @@
+import os
 
 from agents.mcp import MCPServer, MCPServerManager
 from typing import AsyncGenerator, List
@@ -26,8 +27,6 @@ set_default_openai_api("chat_completions")
 set_trace_processors([])  # only use mlflow for trace processing
 mlflow.openai.autolog()
 
-# GENERATED
-
 NAME = 'agent-redox'
 SYSTEM_PROMPT = """You are a healthcare interoperability specialist with deep expertise in the Redox Engine platform. You help developers, integration engineers, clinical informaticists, and data architects understand and work with Redox's healthcare data models, FHIR resource definitions, and data transformation specifications.
 
@@ -51,14 +50,27 @@ When responding to questions:
 You are NOT a clinical decision support system. Do not provide medical advice, diagnoses, or treatment recommendations. Your role is purely technical — helping users understand healthcare data structures, integration patterns, and Redox platform capabilities.
 """
 MODEL = 'databricks-claude-opus-4-6'
-MCP_SERVERS = [
-    ('mcp-redox', 'https://mcp-redox-7474657999482942.aws.databricksapps.com'),
-]
 
-# END GENERATED
 
 def init_mcp_servers():
-    return [McpServer(name=name, url=build_mcp_url(url)) for (name, url) in MCP_SERVERS]
+    """Initialize MCP servers from environment configuration.
+
+    REDOX_MCP_URL is injected at runtime from a Databricks secret
+    (configured per-target in databricks.yml via the 'redox_mcp_url'
+    secret resource). REDOX_MCP_APP_NAME is set from a bundle variable
+    for identification and logging.
+    """
+    redox_mcp_url = os.environ.get("REDOX_MCP_URL")
+    if not redox_mcp_url:
+        raise ValueError(
+            "REDOX_MCP_URL environment variable is not set. "
+            "Ensure the 'redox_mcp_url' secret resource is configured in databricks.yml "
+            "and the corresponding secret scope contains a 'url' key. "
+            "For local dev, set REDOX_MCP_URL in your .env file."
+        )
+    redox_mcp_name = os.environ.get("REDOX_MCP_APP_NAME", "mcp-redox")
+    return [McpServer(name=redox_mcp_name, url=build_mcp_url(redox_mcp_url))]
+
 
 def create_agent(mcp_servers: List[MCPServer]) -> Agent:
     return Agent(
