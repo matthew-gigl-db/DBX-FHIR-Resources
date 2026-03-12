@@ -36,9 +36,9 @@ variables:
   redox_mcp_app_name:
     description: "Display name of the Redox MCP Databricks App (used for logging and server identification)"
     default: "mcp-redox"
-  redox_mcp_secret_scope:
-    description: "Databricks secret scope containing Redox MCP configuration. Must contain a 'url' key with the full MCP server URL."
-    default: "redox-mcp-config"
+  redox_mcp_url:
+    description: "Full URL of the Redox MCP server. Override per target for environment-specific endpoints."
+    default: "https://mcp-redox-14851577059500.aws.databricksapps.com"
 
 resources:
   experiments:
@@ -68,11 +68,11 @@ resources:
             value: "300"
           - name: MLFLOW_EXPERIMENT_ID
             value_from: "experiment"
-          # Redox MCP configuration - injected from bundle variables and secrets
+          # Redox MCP configuration - injected from bundle variables
           - name: REDOX_MCP_APP_NAME
             value: ${var.redox_mcp_app_name}
           - name: REDOX_MCP_URL
-            value_from: "redox_mcp_url"
+            value: ${var.redox_mcp_url}
 
       # Resources which this app has access to
       resources:
@@ -80,11 +80,6 @@ resources:
           experiment:
             experiment_id: ${resources.experiments.redox_agent_experiment.id}
             permission: 'CAN_MANAGE'
-        - name: 'redox_mcp_url'
-          secret:
-            scope: ${var.redox_mcp_secret_scope}
-            key: "url"
-            permission: 'READ'
 
 targets:
   dev:
@@ -94,7 +89,7 @@ targets:
     #   host: https://...
     variables:
       redox_mcp_app_name: "mcp-redox-dev"
-      redox_mcp_secret_scope: "redox-mcp-config-dev"
+      redox_mcp_url: "https://mcp-redox-14851577059500.aws.databricksapps.com"
 
   prod:
     mode: production
@@ -102,7 +97,7 @@ targets:
     #   host: https://...
     variables:
       redox_mcp_app_name: "mcp-redox-prod"
-      redox_mcp_secret_scope: "redox-mcp-config-prod"
+      redox_mcp_url: "https://mcp-redox-14851577059500.aws.databricksapps.com"
     resources:
       apps:
         redox_agent_app:
@@ -131,7 +126,7 @@ targets:
       higher_level_service_principal: aa7772ac-75bc-4f18-8dee-d58e50a11cd0
       run_as_user: ${var.higher_level_service_principal}
       redox_mcp_app_name: "mcp-redox-himss"
-      redox_mcp_secret_scope: "redox-mcp-config-himss"
+      redox_mcp_url: "https://mcp-redox-7474657999482942.aws.databricksapps.com"
     permissions:
       - user_name: matthew.giglia@databricks.com
         level: CAN_MANAGE
