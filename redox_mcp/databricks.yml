@@ -6,7 +6,7 @@ include:
   - resources/*.volume.yml
   - resources/*.schema.yml
   - resources/*.secret_scope.yml
-  - resources/*.app.yml
+  # - resources/*.app.yml
   - resources/*/*.yml
 
 # app deployment command: databricks apps deploy mcp-redox --source-code-path /Workspace/.bundle/redox_mcp/prod/files/src/redox_mcp_serving_app
@@ -163,7 +163,7 @@ targets:
     # run_as:
     #   user_name: ${var.run_as_user}
     variables:
-      catalog: himss
+      catalog: hls_fde
       schema: redox
       higher_level_service_principal: acf021b4-87c6-44ff-b3d7-45c59d63fe4d
       run_as_user: ${var.higher_level_service_principal}
