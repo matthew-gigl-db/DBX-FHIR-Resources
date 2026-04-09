@@ -171,7 +171,7 @@ targets:
         level: CAN_MANAGE
 
 # assumes that a folder path of /Workspace/epic-on-fhir/ has been set up previously on the host workspace and that a service principal with appropriate permissions in Unity Catalog has been created and added below for the higher_level_service_principal variable.  
-  hls_fde_sandbox_prod:
+  hls_fde_sandbox:
     mode: production
     default: false
     presets:
