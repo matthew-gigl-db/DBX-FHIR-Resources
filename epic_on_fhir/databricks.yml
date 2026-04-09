@@ -170,6 +170,60 @@ targets:
       - user_name: matthew.giglia@databricks.com
         level: CAN_MANAGE
 
+# assumes that a folder path of /Workspace/epic-on-fhir/ has been set up previously on the host workspace and that a service principal with appropriate permissions in Unity Catalog has been created and added below for the higher_level_service_principal variable.  
+  hls_fde_sandbox_prod:
+    mode: production
+    default: false
+    presets:
+      name_prefix: "[sandbox] "
+      source_linked_deployment: false
+      tags:
+        project: ${var.tags_project}
+        businessUnit: ${var.tags_businessUnit}
+        requestedBy: ${var.tags_requestedBy}
+        developer: ${var.tags_developer}
+        RemoveAfter: ${var.tags_RemoveAfter}
+        env: ${bundle.target}
+    workspace:
+      host: https://fevm-hls-fde.cloud.databricks.com
+      root_path: /Workspace/epic-on-fhir/.bundle/${bundle.name}/${bundle.target}
+    resources:
+      # only uncomment the secret below iff this host target is unique, or is a fresh deployment
+      secret_scopes:
+        epic_on_fhir_secret_scope:
+          name: ${var.secret_scope_name}
+          permissions:
+          - service_principal_name: ${var.run_as_user}
+            level: MANAGE
+          lifecycle:
+            prevent_destroy: true
+      experiments:
+        epic_on_fhir_requests_experiment:
+          name: /Workspace/.experiments/epic_on_fhir_requests
+          permissions:
+          - level: CAN_READ
+            group_name: users
+          - level: CAN_MANAGE
+            service_principal_name: ${var.run_as_user}
+      model_serving_endpoints:
+        epic_on_fhir_requests_endpoint:
+          name: epic_on_fhir_requests
+          permissions:
+          - level: CAN_QUERY
+            group_name: users
+          - level: CAN_MANAGE
+            service_principal_name: ${var.run_as_user}
+    variables:
+      catalog: hls_fde
+      schema: open_epic_smart_on_fhir
+      higher_level_service_principal: acf021b4-87c6-44ff-b3d7-45c59d63fe4d
+      run_as_user: ${var.higher_level_service_principal}
+      client_id_dbs_key: client_id
+      model_deployment_version: "1"
+    permissions:
+      - user_name: matthew.giglia@databricks.com
+        level: CAN_MANAGE
+
 # use only with real production Epic On FHIR Endpoints, Otherwise Use sandbox_prod target
   prod:
     mode: production
