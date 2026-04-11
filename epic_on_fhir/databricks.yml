@@ -11,6 +11,7 @@ include:
   - resources/*experiment.yml
   - resources/*model.yml
   - resources/*.volume.yml
+  - resources/*job.yml
   - resources/*/*.yml
 
 # Variable declarations. These variables are assigned in the dev/prod targets below.

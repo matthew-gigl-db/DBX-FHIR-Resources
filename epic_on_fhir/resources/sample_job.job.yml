@@ -1,32 +1,72 @@
-# A sample job for epic_on_fhir.
+# Epic on FHIR model registration workflow.
+# Registers a new model version, validates with traced predictions,
+# promotes challenger → champion, and updates the serving endpoint.
+#
+# Run via: databricks bundle run -t <target> epic_on_fhir_model_registration
+# Or via the deploy script: ./deploy.sh <target>
 
 resources:
   jobs:
-    sample_job:
-      name: sample_job
+    epic_on_fhir_model_registration:
+      name: epic_on_fhir_model_registration
+      description: >
+        Registers a new Epic on FHIR requests model version from the
+        EpicFhirPyfuncModel pyfunc, validates it with traced predictions
+        against the Epic sandbox, promotes to champion (rotating prior),
+        and updates the serving endpoint to serve the new version.
 
-      trigger:
-        # Run this job every day, exactly one day from the last run; see https://docs.databricks.com/api/workspace/jobs/create#trigger
-        periodic:
-          interval: 1
-          unit: DAYS
+      tags:
+        project: ${var.tags_project}
+        businessUnit: ${var.tags_businessUnit}
+        developer: ${var.tags_developer}
+        requestedBy: ${var.tags_requestedBy}
 
-      #email_notifications:
-      #  on_failure:
-      #    - your_email@example.com
+      # On-demand execution — no schedule trigger.
+      # Uncomment to run on a schedule:
+      # trigger:
+      #   periodic:
+      #     interval: 7
+      #     unit: DAYS
 
+      # Job-level parameters for runtime overrides.
+      # Defaults resolve from deployed bundle resources and variables.
       parameters:
-        - name: catalog
-          default: ${var.catalog}
-        - name: schema
-          default: ${var.schema}
+        - name: catalog_use
+          default: ${resources.schemas.epic_on_fhir_schema.catalog_name}
+        - name: schema_use
+          default: ${resources.schemas.epic_on_fhir_schema.name}
+        - name: secret_scope_name
+          default: ${var.secret_scope_name}
+        - name: client_id_dbs_key
+          default: ${var.client_id_dbs_key}
+        - name: algo
+          default: ${var.algo}
+        - name: token_url
+          default: ${var.token_url}
+        - name: mlflow_experiment_name
+          default: ${resources.experiments.epic_on_fhir_requests_experiment.name}
 
       tasks:
-        - task_key: notebook_task
+        - task_key: register_and_promote_model
           notebook_task:
-            notebook_path: ../src/sample_notebook.ipynb
+            notebook_path: ../src/epic-on-fhir-requests-model
+            base_parameters:
+              catalog_use: "{{job.parameters.catalog_use}}"
+              schema_use: "{{job.parameters.schema_use}}"
+              secret_scope_name: "{{job.parameters.secret_scope_name}}"
+              client_id_dbs_key: "{{job.parameters.client_id_dbs_key}}"
+              algo: "{{job.parameters.algo}}"
+              token_url: "{{job.parameters.token_url}}"
+              mlflow_experiment_name: "{{job.parameters.mlflow_experiment_name}}"
+          environment_key: default
 
       environments:
         - environment_key: default
           spec:
-            environment_version: "4"
+            environment_version: ${var.serverless_environment_version}
+            dependencies:
+              - ../pyproject.toml
+
+      # email_notifications:
+      #   on_failure:
+      #     - ${var.tags_developer}
