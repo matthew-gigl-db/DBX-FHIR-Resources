@@ -31,10 +31,6 @@ resources:
       # Job-level parameters for runtime overrides.
       # Defaults resolve from deployed bundle resources and variables.
       parameters:
-        - name: catalog_use
-          default: ${resources.schemas.epic_on_fhir_schema.catalog_name}
-        - name: schema_use
-          default: ${resources.schemas.epic_on_fhir_schema.name}
         - name: secret_scope_name
           default: ${var.secret_scope_name}
         - name: client_id_dbs_key
@@ -47,20 +43,21 @@ resources:
           default: ${resources.experiments.epic_on_fhir_requests_experiment.name}
         - name: pip_index_url
           default: ${var.pip_index_url}
+        - name: registered_model_name
+          default: ${resources.schemas.epic_on_fhir_schema.catalog_name}.${resources.schemas.epic_on_fhir_schema.name}.${resources.registered_models.epic_on_fhir_requests_model.name}
 
       tasks:
         - task_key: register_and_promote_model
           notebook_task:
             notebook_path: ../src/epic-on-fhir-requests-model.ipynb
             base_parameters:
-              catalog_use: "{{job.parameters.catalog_use}}"
-              schema_use: "{{job.parameters.schema_use}}"
               secret_scope_name: "{{job.parameters.secret_scope_name}}"
               client_id_dbs_key: "{{job.parameters.client_id_dbs_key}}"
               algo: "{{job.parameters.algo}}"
               token_url: "{{job.parameters.token_url}}"
               mlflow_experiment_name: "{{job.parameters.mlflow_experiment_name}}"
               pip_index_url: "{{job.parameters.pip_index_url}}"
+              registered_model_name: "{{job.parameters.registered_model_name}}"
           environment_key: default
 
       environments:
