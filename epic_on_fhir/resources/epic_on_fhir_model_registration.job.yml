@@ -67,8 +67,11 @@ resources:
         - environment_key: default
           spec:
             environment_version: ${var.serverless_environment_version}
+            # Note: --extra-index-url is NOT used here. Serverless compute uses
+            # Databricks' own package mirror and cannot reach pypi-proxy.
+            # The proxy (var.pip_index_url) is used for local dev, apps, and
+            # model serving only. See .assistant_instructions.md for details.
             dependencies:
-              - --extra-index-url ${var.pip_index_url}
               - PyJWT
               - cryptography
               - requests

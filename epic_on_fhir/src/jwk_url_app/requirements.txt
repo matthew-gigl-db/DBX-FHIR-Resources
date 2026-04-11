@@ -1,7 +1,5 @@
-# Canonical source: var.pip_index_url in databricks.yml
-# This file is not DAB-processed — update this URL manually if the variable changes.
-# Uses --extra-index-url to add proxy alongside the default index.
---extra-index-url https://pypi-proxy.dev.databricks.com/simple/
+# Note: Databricks Apps run on managed infrastructure with their own package mirror.
+# The proxy (var.pip_index_url) is unreachable — do NOT add --extra-index-url here.
 databricks-sdk~=0.33.0
 fastapi~=0.115.0
 uvicorn~=0.32.0
