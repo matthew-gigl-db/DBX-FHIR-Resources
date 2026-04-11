@@ -39,7 +39,7 @@ variables:
     default: 47c0365e-b1af-429c-b56d-07cfb18b5dc7
   serverless_environment_version:
     description: The serverless environment for which to run the workflows, notebook tasks, etc. 
-    default: 4
+    default: 5
   dashboard_embed_credentials:
     description: Set to true if the dashboard should use the owner's credentials, or false if the user's credentials should be used to run the dashboard and access Unity Catalog assets.  
     default: false
