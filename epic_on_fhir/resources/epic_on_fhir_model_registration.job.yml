@@ -26,14 +26,15 @@ resources:
               - "databricks-sdk>=0.20.0"
       
       tasks:
-        # Condition task: Check if we should update AI Gateway only or do full deployment
+        # Condition task: Branch on updateAIGatewayOnly
         - task_key: check_update_mode
           condition_task:
             op: EQUAL_TO
             left: "{{job.parameters.updateAIGatewayOnly}}"
             right: "true"
         
-        # Task 1: Register and promote model (runs only if updateAIGatewayOnly=false)
+        # Branch: updateAIGatewayOnly=false (full deployment)
+        # 1. Register and promote model
         - task_key: register_and_promote_model
           depends_on:
             - task_key: check_update_mode
@@ -44,16 +45,28 @@ resources:
               registered_model_name: "{{job.parameters.registered_model_name}}"
           environment_key: default
         
-        # Task 2: Update endpoint configuration (AI Gateway, telemetry, tags)
-        # Runs after model registration OR directly when register_and_promote_model is skipped.
-        # run_if: ALL_DONE ensures this task executes in both branches:
-        #   - updateAIGatewayOnly=false: register_and_promote_model completes → this runs
-        #   - updateAIGatewayOnly=true: register_and_promote_model is skipped (treated as done) → this runs
-        - task_key: update_endpoint_config
+        # 2. Then update endpoint config
+        - task_key: update_endpoint_config_after_registration
+          depends_on:
+            - task_key: register_and_promote_model
+          notebook_task:
+            notebook_path: ../src/update-serving-endpoint-config.ipynb
+            base_parameters:
+              endpoint_name: "{{job.parameters.endpoint_name}}"
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+              component: epic-on-fhir
+              environment: ${bundle.target}
+              project: ${var.tags_project}
+              owner: ${var.tags_developer}
+          environment_key: default
+        
+        # Branch: updateAIGatewayOnly=true (config-only)
+        # Update endpoint config directly, skip model registration
+        - task_key: update_endpoint_config_only
           depends_on:
             - task_key: check_update_mode
-            - task_key: register_and_promote_model
-          run_if: ALL_DONE
+              outcome: "true"
           notebook_task:
             notebook_path: ../src/update-serving-endpoint-config.ipynb
             base_parameters:
