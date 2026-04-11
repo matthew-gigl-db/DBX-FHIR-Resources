@@ -20,7 +20,7 @@ resources:
       environments:
         - environment_key: default
           spec:
-            client: ${var.serverless_environment_version}
+            environment_version: ${var.serverless_environment_version}
             dependencies:
               - "mlflow>=2.10.0"
               - "databricks-sdk>=0.20.0"
