@@ -40,7 +40,7 @@ Model Serving Endpoint
 
 ### 2. MLflow Experiment
 **Resource**: `epic_on_fhir_requests.experiment.yml`  
-**Path**: `/Workspace/experiments/epic_on_fhir_requests`  
+**Path**: `/Workspace/.experiments/epic_on_fhir_requests`  
 **Purpose**: Track model training experiments for FHIR request optimization
 
 ### 3. Registered Model
@@ -66,9 +66,11 @@ Model Serving Endpoint
 **Resource**: `mlflow_artifacts.volume.yml`  
 **Purpose**: Storage for model artifacts, experiment files, and logs
 
-### 7. Sample Job
-**Resource**: `sample_job.job.yml`  
-**Purpose**: Example job for FHIR data extraction and processing
+### 7. Model Registration Job
+**Resource**: `epic_on_fhir_model_registration.job.yml`  
+**Purpose**: Registers a new model version, validates with traced predictions against the Epic sandbox, promotes challenger → champion, and updates the serving endpoint  
+**Compute**: Serverless (environment version 5)  
+**Trigger**: On-demand via `deploy.sh` or `databricks bundle run`
 
 ## OAuth2 Authentication
 
@@ -89,7 +91,8 @@ Required secrets in `epic_on_fhir_oauth_keys`:
 * `client_id`: Epic application client ID
 * `client_id_prod`: Production client ID (for prod target)
 * `private_key`: RSA private key (PEM format)
-* `jwk_set`: JSON Web Key Set for public key hosting
+* `kid`: Key ID for JWT header
+* `public_key`: Public key (served by JWK app)
 
 ## Getting Started
 
@@ -110,7 +113,8 @@ databricks secrets create-scope epic_on_fhir_oauth_keys
 # Add Epic client credentials
 databricks secrets put-secret --scope epic_on_fhir_oauth_keys --key client_id
 databricks secrets put-secret --scope epic_on_fhir_oauth_keys --key private_key
-databricks secrets put-secret --scope epic_on_fhir_oauth_keys --key jwk_set
+databricks secrets put-secret --scope epic_on_fhir_oauth_keys --key kid
+databricks secrets put-secret --scope epic_on_fhir_oauth_keys --key public_key
 ```
 
 ### 2. Update Configuration
@@ -120,36 +124,174 @@ Edit `databricks.yml` to set:
 * `schema`: Schema for FHIR data (default: `epic_on_fhir`)
 * `run_as_user`: User or service principal
 * `token_url`: Epic OAuth2 token endpoint
-* `model_deployment_version`: Model version to deploy
 
 ### 3. Deploy Bundle
+
+Use the `deploy.sh` script for a complete deployment (recommended), or run individual `databricks bundle` commands manually.
+
+#### Using deploy.sh (Recommended)
+
+```bash
+cd /Workspace/Users/<user>/epic-on-fhir/epic_on_fhir
+
+# Validate first
+databricks bundle validate -t <target>
+
+# Deploy
+./deploy.sh <target>
+```
+
+See the [Deploy Script](#deploy-script-deploysh) section below for full details.
+
+#### Manual Deployment
 
 ```bash
 # Validate bundle
 databricks bundle validate -t dev
 
-# Deploy to development
+# Deploy infrastructure only
 databricks bundle deploy -t dev
 
-# Deploy to production (when ready)
-databricks bundle deploy -t prod
+# Run model registration job
+databricks bundle run -t dev epic_on_fhir_model_registration
 ```
+
+> **Note**: Manual deployment requires understanding the chicken-and-egg dependency
+> between the serving endpoint and model registration. The deploy script handles this
+> automatically. See the deploy script section for details.
 
 ### 4. Access Resources
 
 After deployment:
-* **MLflow Experiment**: Available in workspace under `/Workspace/experiments/`
+* **MLflow Experiment**: Available in workspace under `/Workspace/.experiments/`
 * **Model Serving**: Endpoint accessible via REST API
 * **JWK App**: Databricks App URL for Epic registration
 * **Unity Catalog**: Tables in configured catalog/schema
 
+## Deploy Script (`deploy.sh`)
+
+The deploy script provides single-command, idempotent deployment that handles resource ordering dependencies automatically.
+
+### Usage
+
+```bash
+./deploy.sh [target]
+```
+
+**Arguments:**
+* `target` — Bundle target (default: `dev`). One of: `dev`, `sandbox_prod`, `hls_fde_sandbox_prod`, `prod`
+
+**Examples:**
+```bash
+./deploy.sh                      # Deploy to dev (default)
+./deploy.sh sandbox_prod         # Deploy to sandbox production
+./deploy.sh hls_fde_sandbox_prod # Deploy to HLS FDE sandbox
+./deploy.sh prod                 # Deploy to production
+```
+
+### Three-Phase Deployment
+
+The script runs three phases to handle the chicken-and-egg dependency between the model serving endpoint (which requires a model version to exist) and the model registration notebook (which requires the registered model resource to exist).
+
+#### Phase 1: Deploy Bundle Infrastructure
+
+```
+databricks bundle deploy -t <target>
+```
+
+Creates all bundle resources: schema, experiment, registered model, volume, app, job, and serving endpoint. On **first deployment**, the serving endpoint may fail because no model version exists yet — this is expected.
+
+#### Phase 2: Run Model Registration Job
+
+```
+databricks bundle run -t <target> epic_on_fhir_model_registration
+```
+
+Runs the `epic-on-fhir-requests-model` notebook on serverless compute. The notebook:
+1. Builds the `EpicFhirPyfuncModel` pyfunc
+2. Logs and registers a new model version in Unity Catalog
+3. Sets challenger alias on the new version
+4. Validates with traced predictions against Epic's sandbox (GET and POST payloads)
+5. Validates JSON serialization of responses
+6. Promotes challenger → champion (rotates prior champion to "prior" alias)
+7. Finds and updates the serving endpoint to serve the new champion version
+
+#### Phase 3: Conditional Re-deploy
+
+```
+databricks bundle deploy -t <target>   # only if Phase 1 had partial failure
+```
+
+If Phase 1 failed partially (e.g., serving endpoint couldn't be created), Phase 3 re-deploys the bundle. Now that a model version exists from Phase 2, the serving endpoint creation succeeds.
+
+**On subsequent runs**, Phase 1 fully succeeds (model version already exists), so Phase 3 is skipped — the script is idempotent.
+
+### Flow Diagram
+
+```
+Phase 1: bundle deploy
+    ├─ schema, experiment, registered model, volume, app, job  ✓
+    └─ serving endpoint  ✓ (or ⚠ if no model version yet)
+         │
+Phase 2: bundle run epic_on_fhir_model_registration
+    ├─ Register model v(N) → set challenger alias
+    ├─ Validate with traced predictions
+    ├─ Promote challenger → champion (rotate prior)
+    └─ Update serving endpoint to v(N)
+         │
+Phase 3: bundle deploy  (only if Phase 1 was partial)
+    └─ serving endpoint  ✓ (model version now exists)
+```
+
+### Prerequisites
+
+* Databricks CLI installed and authenticated for the target workspace
+* Secret scope configured with Epic OAuth2 credentials (`client_id`, `private_key`, `kid`, `public_key`)
+* Bundle validated: `databricks bundle validate -t <target>`
+
+### Job Parameters
+
+The model registration job accepts these parameters (all have bundle-resolved defaults):
+
+| Parameter | Default Source | Description |
+|-----------|---------------|-------------|
+| `secret_scope_name` | `var.secret_scope_name` | Secret scope with Epic OAuth2 credentials |
+| `client_id_dbs_key` | `var.client_id_dbs_key` | Key name for client ID in secret scope |
+| `algo` | `var.algo` | JWT signing algorithm (RS384) |
+| `token_url` | `var.token_url` | Epic OAuth2 token endpoint |
+| `mlflow_experiment_name` | `resources.experiments...name` | Deployed experiment path |
+| `pip_index_url` | `var.pip_index_url` | PyPI proxy (local dev only, unused on serverless) |
+| `registered_model_name` | `resources.schemas...catalog_name`.`schemas...name`.`registered_models...name` | Full 3-level UC model namespace |
+
+### Package Dependencies
+
+The serverless environment installs these packages (from Databricks' own package mirror — **not** the PyPI proxy):
+
+* `PyJWT` — JWT token generation
+* `cryptography` — RS384 signing
+* `requests` — HTTP client for FHIR API
+* `mlflow>=3.1` — Model logging and registry
+* `pandas` — DataFrame handling
+* `databricks-sdk>=0.91.0` — Serving endpoint management
+
+> **Important**: Do not add `--index-url` or `--extra-index-url` to the serverless
+> environment dependencies. Serverless compute, Databricks Apps, and model serving all
+> run on Databricks-managed infrastructure with their own package mirror. The PyPI proxy
+> (`pypi-proxy.dev.databricks.com`) is unreachable from these environments.
+
 ## Deployment Targets
 
-| Target | Environment | Catalog | Schema | Client ID Key |
-|--------|-------------|---------|--------|---------------|
-| **dev** | Development | mkgs_dev | epic_on_fhir | client_id |
-| **sandbox_prod** | Sandbox (prod-like) | mkgs | open_epic_smart_on_fhir | client_id |
-| **prod** | Production | main | epic_on_fhir | client_id_prod |
+| Target | Environment | Catalog | Schema | Workspace | Client ID Key |
+|--------|-------------|---------|--------|-----------|---------------|
+| **dev** | Development | mkgs_dev | epic_on_fhir | fe-vm-mkgs-databricks-demos | client_id |
+| **sandbox_prod** | Sandbox (prod-like) | mkgs | open_epic_smart_on_fhir | fe-vm-mkgs-databricks-demos | client_id |
+| **hls_fde_sandbox_prod** | HLS FDE Sandbox | hls_fde | open_epic_smart_on_fhir | fevm-hls-fde | client_id |
+| **prod** | Production | main | epic_on_fhir | dbc-de8ffabd-1dae | client_id_prod |
+
+> **Note**: Production targets (`sandbox_prod`, `hls_fde_sandbox_prod`, `prod`) use
+> `name_prefix` which is applied to all resource names (schema, model, endpoints).
+> The `registered_model_name` job parameter resolves to the full prefixed 3-level
+> namespace automatically.
 
 ## FHIR Resources Supported
 
@@ -175,9 +317,9 @@ Content-Type: application/json
 {
   "dataframe_records": [
     {
-      "patient_id": "12345",
-      "resource_type": "Observation",
-      "query_params": {...}
+      "http_method": "get",
+      "resource": "Patient",
+      "action": "<patient-fhir-id>"
     }
   ]
 }
@@ -188,14 +330,25 @@ Content-Type: application/json
 ```json
 {
   "predictions": [
-    {
-      "optimized_request": {...},
-      "estimated_latency_ms": 250,
-      "recommended_batch_size": 10
-    }
+    "{\"response_status_code\": 200, \"response_time_seconds\": 0.25, \"response_headers\": {...}, \"response_text\": \"...\", \"response_url\": \"...\"}"
   ]
 }
 ```
+
+Each prediction is a JSON-serialized string containing the Epic FHIR API response.
+
+## Proxy Configuration
+
+The bundle uses Databricks PyPI and npm proxies **for local development only**.
+
+| Location | Purpose | File |
+|----------|---------|------|
+| PyPI proxy | `uv sync` for local dev | `pyproject.toml` (`[[tool.uv.index]]`) |
+| npm proxy | `npm install` for JWK app local dev | `.npmrc` |
+
+Canonical proxy URLs are defined in `databricks.yml` variables (`var.pip_index_url`, `var.npm_registry_url`). The static files (`pyproject.toml`, `.npmrc`) have comments pointing to the canonical source — update manually if the proxy URL changes.
+
+**Databricks-managed compute** (serverless, Apps, model serving) uses its own package mirror and **cannot reach** the proxy. Do not add proxy configuration to job dependencies, app YAML, app `requirements.txt`, or model serving conda environments.
 
 ## Development Workflow
 
@@ -209,6 +362,7 @@ Content-Type: application/json
 
 * **Model Serving Metrics**: Request latency, throughput, error rates
 * **MLflow Tracking**: Model performance, experiment comparisons
+* **MLflow Tracing**: Traced predictions during validation for debugging
 * **Unity Catalog Lineage**: Data flow from Epic to downstream tables
 * **Databricks SQL**: Query FHIR data for analytics
 
@@ -226,6 +380,12 @@ Content-Type: application/json
 * Check model version is correctly deployed
 * Verify endpoint has sufficient compute resources
 * Review serving endpoint logs in Databricks UI
+
+### Deploy Script Failures
+
+* **Phase 1 partial failure**: Expected on first deploy (serving endpoint needs a model version). Phase 3 will retry.
+* **Phase 2 failure**: Check notebook cell output in the job run. Common causes: secret scope not configured, Epic sandbox unreachable, MLflow experiment permissions.
+* **Package install timeout**: Do **not** add `--extra-index-url` to serverless dependencies. The proxy is unreachable from serverless compute.
 
 ## Documentation & Resources
 
