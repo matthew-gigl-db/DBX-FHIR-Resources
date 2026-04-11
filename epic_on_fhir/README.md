@@ -54,8 +54,9 @@ Model Serving Endpoint
 **Purpose**: Real-time API for FHIR request processing  
 **Features**:
 * Auto-scaling based on load
-* Model versioning and A/B testing
-* Query logging and monitoring
+* AI Gateway with inference table logging, usage tracking, and rate limiting
+* OpenTelemetry telemetry (traces, logs, metrics to Unity Catalog tables)
+* Resource tags for cost attribution
 
 ### 5. JWK URL Databricks App
 **Resource**: `jwk_url.app.yml`  
@@ -68,9 +69,20 @@ Model Serving Endpoint
 
 ### 7. Model Registration Job
 **Resource**: `epic_on_fhir_model_registration.job.yml`  
-**Purpose**: Registers a new model version, validates with traced predictions against the Epic sandbox, promotes challenger → champion, and updates the serving endpoint  
-**Compute**: Serverless (environment version 5)  
-**Trigger**: On-demand via `deploy.sh` or `databricks bundle run`
+**Purpose**: Registers a new model version, validates, promotes to champion, and updates the serving endpoint configuration  
+**Compute**: Serverless (shared environment with mlflow and databricks-sdk)  
+**Trigger**: On-demand via `deploy.sh` or `databricks bundle run`  
+**Conditional execution** via `updateAIGatewayOnly` parameter:
+* `false` (default): Full deployment — register model, then update endpoint config
+* `true`: Config-only — skip model registration, only update AI Gateway/telemetry/tags
+
+**Tasks**:
+
+| Task | Condition | Purpose |
+| --- | --- | --- |
+| `check_update_mode` | Always runs | Evaluates `updateAIGatewayOnly` parameter |
+| `register_and_promote_model` | Runs if `updateAIGatewayOnly=false` | Model registration, validation, promotion |
+| `update_endpoint_config` | Runs after all tasks complete (`run_if: ALL_DONE`) | Updates AI Gateway, telemetry, tags via SDK |
 
 ## OAuth2 Authentication
 
@@ -152,8 +164,11 @@ databricks bundle validate -t dev
 # Deploy infrastructure only
 databricks bundle deploy -t dev
 
-# Run model registration job
+# Run model registration job (full deployment)
 databricks bundle run -t dev epic_on_fhir_model_registration
+
+# Or update endpoint config only (no model registration)
+databricks bundle run -t dev epic_on_fhir_model_registration --params updateAIGatewayOnly=true
 ```
 
 > **Note**: Manual deployment requires understanding the chicken-and-egg dependency
@@ -189,9 +204,9 @@ The deploy script provides single-command, idempotent deployment that handles re
 ./deploy.sh prod                 # Deploy to production
 ```
 
-### Three-Phase Deployment
+### Four-Phase Deployment
 
-The script runs three phases to handle the chicken-and-egg dependency between the model serving endpoint (which requires a model version to exist) and the model registration notebook (which requires the registered model resource to exist).
+The script runs four phases to handle the chicken-and-egg dependency between the model serving endpoint (which requires a model version to exist) and the model registration notebook (which requires the registered model resource to exist).
 
 #### Phase 1: Deploy Bundle Infrastructure
 
@@ -207,7 +222,7 @@ Creates all bundle resources: schema, experiment, registered model, volume, app,
 databricks bundle run -t <target> epic_on_fhir_model_registration
 ```
 
-Runs the `epic-on-fhir-requests-model` notebook on serverless compute. The notebook:
+Runs the job with default parameters (`updateAIGatewayOnly=false`). The `register_and_promote_model` task runs the `epic-on-fhir-requests-model` notebook on serverless compute:
 1. Builds the `EpicFhirPyfuncModel` pyfunc
 2. Logs and registers a new model version in Unity Catalog
 3. Sets challenger alias on the new version
@@ -215,6 +230,8 @@ Runs the `epic-on-fhir-requests-model` notebook on serverless compute. The noteb
 5. Validates JSON serialization of responses
 6. Promotes challenger → champion (rotates prior champion to "prior" alias)
 7. Finds and updates the serving endpoint to serve the new champion version
+
+The `update_endpoint_config` task then runs to apply AI Gateway, telemetry, and tag settings. On **first deployment**, this task exits gracefully if the endpoint doesn't exist yet (the notebook detects this and calls `dbutils.notebook.exit()`).
 
 #### Phase 3: Conditional Re-deploy
 
@@ -224,7 +241,15 @@ databricks bundle deploy -t <target>   # only if Phase 1 had partial failure
 
 If Phase 1 failed partially (e.g., serving endpoint couldn't be created), Phase 3 re-deploys the bundle. Now that a model version exists from Phase 2, the serving endpoint creation succeeds.
 
-**On subsequent runs**, Phase 1 fully succeeds (model version already exists), so Phase 3 is skipped — the script is idempotent.
+#### Phase 4: Conditional Endpoint Config Update
+
+```
+databricks bundle run -t <target> epic_on_fhir_model_registration --params updateAIGatewayOnly=true
+```
+
+Only runs if Phase 1 had partial failure. On first deployment, Phase 2's `update_endpoint_config` task skipped because the endpoint didn't exist. Now that Phase 3 created it, Phase 4 re-runs the job with `updateAIGatewayOnly=true` to apply AI Gateway, telemetry, and tags without re-registering the model.
+
+**On subsequent runs**, Phase 1 fully succeeds (model version already exists), so Phases 3 and 4 are skipped — the script is idempotent.
 
 ### Flow Diagram
 
@@ -234,13 +259,25 @@ Phase 1: bundle deploy
     └─ serving endpoint  ✓ (or ⚠ if no model version yet)
          │
 Phase 2: bundle run epic_on_fhir_model_registration
-    ├─ Register model v(N) → set challenger alias
-    ├─ Validate with traced predictions
-    ├─ Promote challenger → champion (rotate prior)
-    └─ Update serving endpoint to v(N)
+    ├─ check_update_mode → false (full deployment)
+    ├─ register_and_promote_model:
+    │   ├─ Register model v(N) → set challenger alias
+    │   ├─ Validate with traced predictions
+    │   ├─ Promote challenger → champion (rotate prior)
+    │   └─ Update serving endpoint to v(N)
+    └─ update_endpoint_config:
+        └─ ✓ (or ⚠ SKIPPED if endpoint doesn't exist yet)
          │
 Phase 3: bundle deploy  (only if Phase 1 was partial)
     └─ serving endpoint  ✓ (model version now exists)
+         │
+Phase 4: bundle run --params updateAIGatewayOnly=true  (only if Phase 1 was partial)
+    ├─ check_update_mode → true (config-only)
+    ├─ register_and_promote_model → SKIPPED
+    └─ update_endpoint_config:
+        ├─ AI Gateway (inference tables, usage tracking, rate limits)
+        ├─ Telemetry (OTel traces, logs, metrics tables)
+        └─ Tags (component, environment, project, owner)
 ```
 
 ### Prerequisites
@@ -254,25 +291,21 @@ Phase 3: bundle deploy  (only if Phase 1 was partial)
 The model registration job accepts these parameters (all have bundle-resolved defaults):
 
 | Parameter | Default Source | Description |
-|-----------|---------------|-------------|
-| `secret_scope_name` | `var.secret_scope_name` | Secret scope with Epic OAuth2 credentials |
-| `client_id_dbs_key` | `var.client_id_dbs_key` | Key name for client ID in secret scope |
-| `algo` | `var.algo` | JWT signing algorithm (RS384) |
-| `token_url` | `var.token_url` | Epic OAuth2 token endpoint |
-| `mlflow_experiment_name` | `resources.experiments...name` | Deployed experiment path |
-| `pip_index_url` | `var.pip_index_url` | PyPI proxy (local dev only, unused on serverless) |
+| --- | --- | --- |
+| `catalog` | `resources.schemas...catalog_name` | Unity Catalog catalog name |
+| `schema` | `resources.schemas...name` | Unity Catalog schema name |
 | `registered_model_name` | `resources.schemas...catalog_name`.`schemas...name`.`registered_models...name` | Full 3-level UC model namespace |
+| `endpoint_name` | `resources.model_serving_endpoints...name` | Serving endpoint name |
+| `updateAIGatewayOnly` | `"false"` | Skip model registration, only update endpoint config |
+
+The `register_and_promote_model` task passes `registered_model_name` to the notebook. The `update_endpoint_config` task passes `endpoint_name`, `catalog`, `schema`, and tag values.
 
 ### Package Dependencies
 
 The serverless environment installs these packages (from Databricks' own package mirror — **not** the PyPI proxy):
 
-* `PyJWT` — JWT token generation
-* `cryptography` — RS384 signing
-* `requests` — HTTP client for FHIR API
-* `mlflow>=3.1` — Model logging and registry
-* `pandas` — DataFrame handling
-* `databricks-sdk>=0.91.0` — Serving endpoint management
+* `mlflow>=2.10.0` — Model logging and registry
+* `databricks-sdk>=0.20.0` — Serving endpoint management
 
 > **Important**: Do not add `--index-url` or `--extra-index-url` to the serverless
 > environment dependencies. Serverless compute, Databricks Apps, and model serving all
@@ -282,7 +315,7 @@ The serverless environment installs these packages (from Databricks' own package
 ## Deployment Targets
 
 | Target | Environment | Catalog | Schema | Workspace | Client ID Key |
-|--------|-------------|---------|--------|-----------|---------------|
+| --- | --- | --- | --- | --- | --- |
 | **dev** | Development | mkgs_dev | epic_on_fhir | fe-vm-mkgs-databricks-demos | client_id |
 | **sandbox_prod** | Sandbox (prod-like) | mkgs | open_epic_smart_on_fhir | fe-vm-mkgs-databricks-demos | client_id |
 | **hls_fde_sandbox_prod** | HLS FDE Sandbox | hls_fde | open_epic_smart_on_fhir | fevm-hls-fde | client_id |
@@ -342,7 +375,7 @@ Each prediction is a JSON-serialized string containing the Epic FHIR API respons
 The bundle uses Databricks PyPI and npm proxies **for local development only**.
 
 | Location | Purpose | File |
-|----------|---------|------|
+| --- | --- | --- |
 | PyPI proxy | `uv sync` for local dev | `pyproject.toml` (`[[tool.uv.index]]`) |
 | npm proxy | `npm install` for JWK app local dev | `.npmrc` |
 
@@ -363,6 +396,8 @@ Canonical proxy URLs are defined in `databricks.yml` variables (`var.pip_index_u
 * **Model Serving Metrics**: Request latency, throughput, error rates
 * **MLflow Tracking**: Model performance, experiment comparisons
 * **MLflow Tracing**: Traced predictions during validation for debugging
+* **AI Gateway Inference Tables**: Request/response payload logging for audit
+* **OpenTelemetry**: Traces, logs, and metrics persisted to Unity Catalog Delta tables
 * **Unity Catalog Lineage**: Data flow from Epic to downstream tables
 * **Databricks SQL**: Query FHIR data for analytics
 
@@ -383,8 +418,9 @@ Canonical proxy URLs are defined in `databricks.yml` variables (`var.pip_index_u
 
 ### Deploy Script Failures
 
-* **Phase 1 partial failure**: Expected on first deploy (serving endpoint needs a model version). Phase 3 will retry.
-* **Phase 2 failure**: Check notebook cell output in the job run. Common causes: secret scope not configured, Epic sandbox unreachable, MLflow experiment permissions.
+* **Phase 1 partial failure**: Expected on first deploy (serving endpoint needs a model version). Phases 3 and 4 will handle it.
+* **Phase 2 failure**: Check notebook cell output in the job run. Common causes: secret scope not configured, Epic sandbox unreachable, MLflow experiment permissions. The `update_endpoint_config` task exits gracefully if the endpoint doesn't exist yet — this is normal on first deploy.
+* **Phase 4 failure**: The endpoint exists (Phase 3 created it) but the SDK calls failed. Check the `update-serving-endpoint-config` notebook output for API errors.
 * **Package install timeout**: Do **not** add `--extra-index-url` to serverless dependencies. The proxy is unreachable from serverless compute.
 
 ## Documentation & Resources

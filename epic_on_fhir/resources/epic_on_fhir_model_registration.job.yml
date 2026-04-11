@@ -39,7 +39,7 @@ resources:
             - task_key: check_update_mode
               outcome: "false"
           notebook_task:
-            notebook_path: ../src/epic_on_fhir_requests_model_registration.ipynb
+            notebook_path: ../src/epic-on-fhir-requests-model.ipynb
             base_parameters:
               registered_model_name: "{{job.parameters.registered_model_name}}"
           environment_key: default
@@ -61,7 +61,7 @@ resources:
               catalog: "{{job.parameters.catalog}}"
               schema: "{{job.parameters.schema}}"
               component: epic-on-fhir
-              environment: ${var.environment}
-              project: epic-on-fhir-bundle
-              owner: ${var.owner}
+              environment: ${bundle.target}
+              project: ${var.tags_project}
+              owner: ${var.tags_developer}
           environment_key: default
