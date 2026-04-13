@@ -7,12 +7,11 @@ resources:
         Evaluates model against Epic FHIR sandbox, checks Unity Catalog tag for manual approval, then promotes
         to "champion" and updates serving endpoint.
       
-      # Deployment job requirements: model_name and model_version parameters
       parameters:
         - name: model_name
-          # Required for deployment jobs - no default
+          default: "${resources.schemas.epic_on_fhir_schema.catalog_name}.${resources.schemas.epic_on_fhir_schema.name}.${resources.registered_models.epic_on_fhir_requests_model.name}"
         - name: model_version
-          # Required for deployment jobs - no default
+          default: "1"
         - name: catalog
           default: ${resources.schemas.epic_on_fhir_schema.catalog_name}
         - name: schema
