@@ -15,7 +15,8 @@ This asset bundle provides production-ready integration with Epic's FHIR endpoin
 * **JWK Hosting**: Databricks App for serving JSON Web Keys (JWKs)
 * **Unity Catalog Storage**: Secure storage of FHIR resources
 * **MLflow Tracking**: Experiment tracking for model development
-* **MLflow 3 Deployment Jobs**: Evaluation, human-in-the-loop approval, and automated promotion
+* **MLflow 3 Deployment Jobs**: Evaluation, human-in-the-loop approval (with auto-repair), and automated promotion
+* **SQL Endpoint Testing**: `ai_query`-based FHIR endpoint test flow from the SQL Editor
 
 ## Architecture
 
@@ -30,8 +31,76 @@ Model Training & Experimentation
     ↓ Model Registry
 Registration Job → sets "challenger" alias
     ↓ Triggers deployment job
-Deployment Job → evaluate → approve → promote to "champion"
+Deployment Job → evaluate → approve (auto-repair) → promote to "champion"
     → Model Serving Endpoint (Real-time FHIR Request API)
+        → SQL ai_query() / REST API / Python SDK
+```
+
+## Project Structure
+
+```
+epic_on_fhir/
+├── databricks.yml                 # Bundle configuration (targets, variables, resources)
+├── deploy.sh                      # Single-command deployment script (4-phase)
+├── README.md                      # This file
+├── pyproject.toml                 # Python project config (uv, local dev)
+├── uv.lock                        # Dependency lockfile
+├── .npmrc                         # npm proxy config (local dev)
+├── .gitignore
+│
+├── resources/                     # Databricks Asset Bundle resource definitions
+│   ├── epic_on_fhir.schema.yml
+│   ├── epic_on_fhir_requests.experiment.yml
+│   ├── epic_on_fhir_requests.registered_model.yml
+│   ├── epic_on_fhir_requests.serving.yml
+│   ├── epic_on_fhir_model_registration.job.yml
+│   ├── epic_on_fhir_model_deployment.job.yml
+│   ├── mlflow_artifacts.volume.yml
+│   └── jwk_url.app.yml
+│
+├── src/                           # Source notebooks and Python modules
+│   ├── epic-on-fhir-requests-model  # Model registration notebook
+│   ├── evaluation                   # Evaluation notebook (deployment job task 1)
+│   ├── approval                     # Approval check notebook (deployment job task 2)
+│   ├── deployment                   # Deployment notebook (deployment job task 3)
+│   ├── epic-smart-on-fhir-class-examples  # Interactive examples notebook
+│   ├── epic-sandbox-basic-auth      # Basic auth examples notebook
+│   │
+│   ├── smart_on_fhir/              # Python package (bundled into model artifact)
+│   │   ├── __init__.py
+│   │   ├── auth.py                 # EpicApiAuth: JWT-based OAuth2
+│   │   ├── endpoint.py             # EpicApiRequest: FHIR API client
+│   │   ├── epic_fhir_pyfunc.py     # EpicFhirPyfuncModel: MLflow pyfunc
+│   │   └── epic_fhir_model.py      # Models-from-code entrypoint
+│   │
+│   ├── jwk_url_app/                # Databricks App for hosting JWK sets
+│   │   ├── app.py
+│   │   └── requirements.txt
+│   │
+│   ├── queries/                    # SQL queries
+│   │   └── Epic FHIR Endpoint Test Flow.dbquery.ipynb
+│   │
+│   └── _archive/                   # Deprecated notebooks (kept as reference)
+│       └── update-serving-endpoint-config  # Superseded by deployment notebook + YAML
+│
+├── tests/                          # Pytest test suite
+│   ├── conftest.py                 # Shared fixtures, path setup, constants
+│   ├── test_auth.py                # EpicApiAuth unit tests
+│   ├── test_endpoint.py            # EpicApiRequest unit tests
+│   ├── test_epic_fhir_pyfunc.py    # EpicFhirPyfuncModel unit tests
+│   ├── test_payloads.py            # FHIR payload construction tests
+│   ├── test_registration_notebook.py   # Registration workflow tests
+│   ├── test_evaluation_notebook.py     # Evaluation workflow tests
+│   ├── test_approval_notebook.py       # Approval workflow tests
+│   └── test_deployment_notebook.py     # Deployment workflow tests
+│
+└── fixtures/                       # Test fixtures and session records
+    ├── examples/                   # Example FHIR payloads
+    ├── images/                     # Documentation images
+    ├── sessions/                   # Per-session development summaries
+    │   ├── INDEX.md
+    │   └── YYYY-MM-DD_description.md
+    └── danger/                     # Destructive operation scripts
 ```
 
 ## Bundle Resources
@@ -57,7 +126,7 @@ Deployment Job → evaluate → approve → promote to "champion"
 **Purpose**: Real-time API for FHIR request processing  
 **Features**:
 * Auto-scaling based on load
-* AI Gateway with inference table logging, usage tracking, and rate limiting
+* AI Gateway with inference table logging, usage tracking, and rate limiting (configured declaratively in YAML)
 * OpenTelemetry telemetry (traces, logs, metrics to Unity Catalog tables)
 * Resource tags for cost attribution
 
@@ -86,7 +155,7 @@ Deployment Job → evaluate → approve → promote to "champion"
 ### 8. Model Deployment Job
 **Resource**: `epic_on_fhir_model_deployment.job.yml`  
 **Purpose**: MLflow 3 deployment job — evaluates, approves, and promotes a model version from "challenger" to "champion"  
-**Compute**: Serverless (shared environment with mlflow, databricks-sdk, databricks-agents)  
+**Compute**: Serverless (shared environment with mlflow, databricks-sdk)  
 **Trigger**: Auto-triggered on new model version creation, or on-demand  
 **Concurrency**: `max_concurrent_runs: 1`
 
@@ -94,9 +163,11 @@ Deployment Job → evaluate → approve → promote to "champion"
 
 | Task | Depends On | Purpose |
 | --- | --- | --- |
-| `evaluation` | — | Loads model by name/version, runs traced FHIR predictions (GET/POST), logs metrics (status codes, response time, pass/fail) to UC model version page |
-| `approval_check` | `evaluation` | Checks Unity Catalog tag `approval_check = 'approved'` on model version. Fails if not approved (human-in-the-loop gate). Task name starts with "approval" per MLflow 3 requirement. |
-| `deployment` | `approval_check` | Promotes challenger → champion (rotates old champion → prior), updates serving endpoint version, configures AI Gateway/telemetry/tags |
+| `evaluation` | — | Loads model by name/version, runs traced FHIR predictions (GET Patient, POST Observation, POST AllergyIntolerance), validates JSON serialization, logs metrics (status codes, response times, pass/fail) to UC model version page and MLflow experiment |
+| `approval_check` | `evaluation` | Checks Unity Catalog tag `approval_check = 'approved'` on model version. **Instant check** — fails immediately if not approved (`max_retries: 0`). The UC UI "Approve" button sets the tag and triggers **auto-repair**, which re-runs this task automatically. No polling or timeout. |
+| `deployment` | `approval_check` | Promotes challenger → champion (rotates old champion → prior), updates serving endpoint version (preserving `environment_vars` from the current config), verifies endpoint is serving the correct version. AI Gateway configuration is managed declaratively by the bundle YAML. |
+
+> **SDK install convention**: The deployment notebook includes `%pip install --upgrade databricks-sdk mlflow` + `restartPython()` as its first code cell to ensure the latest SDK version. This is required for any notebook that imports `databricks.sdk`.
 
 ## OAuth2 Authentication
 
@@ -119,6 +190,63 @@ Required secrets in `epic_on_fhir_oauth_keys`:
 * `private_key`: RSA private key (PEM format)
 * `kid`: Key ID for JWT header
 * `public_key`: Public key (served by JWK app)
+
+## Testing
+
+The test suite uses **pytest** and is discoverable by the Databricks workspace **Testing sidebar**. All tests mock external dependencies (MLflow, Databricks SDK, Epic FHIR API) — no real API calls or secrets required.
+
+### Test Files
+
+| File | Tests | Coverage |
+| --- | --- | --- |
+| `test_auth.py` | EpicApiAuth | JWT generation, token exchange, key loading |
+| `test_endpoint.py` | EpicApiRequest | FHIR API client, URL construction, error handling |
+| `test_epic_fhir_pyfunc.py` | EpicFhirPyfuncModel | Model init, predict(), NaN handling, error paths |
+| `test_payloads.py` | FHIR payloads | Payload construction, JSON validity |
+| `test_registration_notebook.py` | Registration workflow | Payload schema, conda env completeness, model template syntax, challenger alias, exit payload |
+| `test_evaluation_notebook.py` | Evaluation workflow | Payload generation, JSON serialization validation, metric computation, validation gate assertions |
+| `test_approval_notebook.py` | Approval workflow | Tag key convention (`approval_check`), approved/rejected/missing paths, case insensitivity, error messages |
+| `test_deployment_notebook.py` | Deployment workflow | Alias rotation, env_vars preservation, ServedEntityInput construction, custom tags parsing, verification logic, SDK keyword-arg call pattern |
+
+### Running Tests
+
+```bash
+# From the bundle root directory
+cd epic_on_fhir
+
+# Run all tests
+python -B -m pytest tests/ -v
+
+# Run only notebook workflow tests
+python -B -m pytest tests/test_*_notebook.py -v
+
+# Run from Databricks workspace Testing sidebar
+# (auto-discovers test_*.py files)
+```
+
+### Shared Fixtures (`conftest.py`)
+
+* **Fake secrets**: RSA key pair, client ID, kid (generated at import time, not real credentials)
+* **Model fixtures**: `pyfunc_model`, `epic_auth`, `epic_api`
+* **Mock fixtures**: `mock_mlflow_client`, `mock_workspace_client`, `mock_model_info`
+* **Spark fixture**: Optional `spark` session (skipped when Spark unavailable)
+* **Constants**: `FAKE_MODEL_NAME`, `FAKE_ENDPOINT_NAME`, `FAKE_CATALOG`, `FAKE_SCHEMA`, etc.
+
+## SQL Endpoint Test Flow
+
+The bundle includes a SQL query (`src/queries/Epic FHIR Endpoint Test Flow`) that exercises the full FHIR endpoint lifecycle using `ai_query()` from the SQL Editor:
+
+1. **Search Patient** by external identifier (`GET Patient?identifier=EXTERNAL|Z6129`)
+2. **Patient Clinical Summary** (`GET Patient/{id}/$summary`)
+3. **Search Encounters** for the patient (`GET Encounter?patient=Patient/{id}`)
+4. **Create Observation** — Heart Rate vital sign (`POST Observation`)
+5. **Verify Observation** — Read-back (`GET Observation/{id}`)
+6. **Create AllergyIntolerance** — Penicillin allergy (`POST AllergyIntolerance`)
+7. **Verify AllergyIntolerance** — Read-back (`GET AllergyIntolerance/{id}`)
+
+The query uses SQL session variables to chain FHIR resource IDs between steps, and a final summary statement reports pass/fail for each step.
+
+This is useful for validating the serving endpoint works end-to-end without running notebooks or Python code.
 
 ## Getting Started
 
@@ -200,7 +328,7 @@ databricks bundle run -t dev epic_on_fhir_model_deployment \
 
 After deployment:
 * **MLflow Experiment**: Available in workspace under `/Workspace/.experiments/`
-* **Model Serving**: Endpoint accessible via REST API
+* **Model Serving**: Endpoint accessible via REST API or `ai_query()` from SQL
 * **JWK App**: Databricks App URL for Epic registration
 * **Unity Catalog**: Tables in configured catalog/schema
 
@@ -274,7 +402,7 @@ databricks bundle run -t <target> epic_on_fhir_model_deployment \
 The deployment job then:
 1. **Evaluates** the model against the Epic FHIR sandbox (traced predictions, metrics)
 2. **Checks approval** via the UC tag (passes because deploy.sh auto-approved)
-3. **Deploys**: promotes challenger → champion, updates serving endpoint, configures AI Gateway/telemetry/tags
+3. **Deploys**: promotes challenger → champion, updates serving endpoint (preserving environment_vars), verifies endpoint version
 
 **On subsequent runs**, Phase 1 fully succeeds (model version already exists), so Phases 3 and 4 are skipped. The deployment job auto-triggers on new model version creation.
 
@@ -299,15 +427,14 @@ Phase 4: set approval tag + bundle run epic_on_fhir_model_deployment  (only if P
     ├─ evaluation:
     │   ├─ Load model by name/version
     │   ├─ Traced FHIR predictions (GET Patient, POST Observation, etc.)
-    │   └─ Log metrics to UC model version page
+    │   └─ Log metrics to UC model version page + experiment
     ├─ approval_check:
-    │   └─ Verify UC tag: approval_check = 'approved'
+    │   └─ Instant check: approval_check = 'approved' (auto-repair on failure)
     └─ deployment:
         ├─ Promote challenger → champion (rotate prior)
-        ├─ Update serving endpoint to new version
-        ├─ AI Gateway (inference tables, usage tracking, rate limits)
-        ├─ Telemetry (OTel traces, logs, metrics tables)
-        └─ Tags (component, environment, project, owner)
+        ├─ Update serving endpoint (preserve environment_vars)
+        ├─ Verify endpoint serves correct version
+        └─ AI Gateway config managed by bundle YAML
 ```
 
 ### Prerequisites
@@ -336,6 +463,7 @@ Phase 4: set approval tag + bundle run epic_on_fhir_model_deployment  (only if P
 | --- | --- | --- |
 | `model_name` | *(required, no default)* | Full 3-level UC model name (e.g., `catalog.schema.model`) |
 | `model_version` | *(required, no default)* | Model version number to deploy |
+| `mlflow_experiment_name` | `resources.experiments...name` | MLflow experiment path |
 | `catalog` | `resources.schemas...catalog_name` | Unity Catalog catalog name |
 | `schema` | `resources.schemas...name` | Unity Catalog schema name |
 | `endpoint_name` | `resources.model_serving_endpoints...name` | Serving endpoint name |
@@ -345,9 +473,8 @@ Phase 4: set approval tag + bundle run epic_on_fhir_model_deployment  (only if P
 
 The serverless environment installs these packages (from Databricks' own package mirror — **not** the PyPI proxy):
 
-* `mlflow>=3.0.0` — Model logging, registry, and deployment job integration
-* `databricks-sdk>=0.20.0` — Serving endpoint management
-* `databricks-agents>=0.1.0` — Agent evaluation framework (deployment job only)
+* `mlflow>=3.0.0` — Model logging, registry, tracing, and deployment job integration
+* `databricks-sdk>=0.20.0` — Serving endpoint management (update_config_and_wait)
 
 > **Important**: Do not add `--index-url` or `--extra-index-url` to the serverless
 > environment dependencies. Serverless compute, Databricks Apps, and model serving all
@@ -412,6 +539,23 @@ Content-Type: application/json
 
 Each prediction is a JSON-serialized string containing the Epic FHIR API response.
 
+### SQL Access via ai_query()
+
+The endpoint can also be called from SQL using `ai_query()`:
+
+```sql
+SELECT ai_query(
+  'epic_on_fhir_requests',
+  request => named_struct(
+    'http_method', 'get',
+    'resource', 'Patient',
+    'action', '<patient-fhir-id>',
+    'data', CAST(NULL AS STRING)
+  ),
+  returnType => 'STRUCT<response_status_code:INT, response_time_seconds:DOUBLE, response_text:STRING>'
+) AS resp
+```
+
 ## Proxy Configuration
 
 The bundle uses Databricks PyPI and npm proxies **for local development only**.
@@ -430,9 +574,10 @@ Canonical proxy URLs are defined in `databricks.yml` variables (`var.pip_index_u
 1. **Test in Sandbox**: Use Epic's sandbox environment (`client_id`)
 2. **Train Models**: Run experiments in dev workspace
 3. **Register Model**: Run registration job to register to Unity Catalog (sets "challenger" alias)
-4. **Approve Model**: Set `approval_check = approved` tag on the model version in Unity Catalog
-5. **Deploy to Serving**: Deployment job auto-triggers — evaluates, promotes to "champion", updates endpoint
-6. **Production Deployment**: Use production credentials (`client_id_prod`)
+4. **Approve Model**: Click "Approve" on the UC model version page (sets `approval_check = approved` tag), or set the tag via CLI/API
+5. **Deploy to Serving**: Deployment job auto-triggers — evaluates, auto-repair waits for approval, promotes to "champion", updates endpoint
+6. **Validate via SQL**: Run the `Epic FHIR Endpoint Test Flow` query to verify end-to-end
+7. **Production Deployment**: Use production credentials (`client_id_prod`)
 
 ## Monitoring & Observability
 
@@ -440,10 +585,10 @@ Canonical proxy URLs are defined in `databricks.yml` variables (`var.pip_index_u
 * **MLflow Tracking**: Model performance, experiment comparisons
 * **MLflow Tracing**: Traced predictions during evaluation for debugging
 * **UC Model Version Metrics**: Evaluation metrics logged directly to model version page
-* **AI Gateway Inference Tables**: Request/response payload logging for audit
+* **AI Gateway Inference Tables**: Request/response payload logging for audit (configured in serving YAML)
 * **OpenTelemetry**: Traces, logs, and metrics persisted to Unity Catalog Delta tables
 * **Unity Catalog Lineage**: Data flow from Epic to downstream tables
-* **Databricks SQL**: Query FHIR data for analytics
+* **Databricks SQL**: Query FHIR data for analytics using `ai_query()`
 
 ## Troubleshooting
 
@@ -459,6 +604,7 @@ Canonical proxy URLs are defined in `databricks.yml` variables (`var.pip_index_u
 * Check model version is correctly deployed
 * Verify endpoint has sufficient compute resources
 * Review serving endpoint logs in Databricks UI
+* If environment_vars are missing after an endpoint update, check that the deployment notebook is preserving them from the current served entity config
 
 ### Deploy Script Failures
 
@@ -471,8 +617,21 @@ Canonical proxy URLs are defined in `databricks.yml` variables (`var.pip_index_u
 ### Deployment Job Issues
 
 * **Evaluation task fails**: Check FHIR sandbox connectivity and model predictions. Metrics are logged to the UC model version page for debugging.
-* **Approval task fails**: Set the `approval_check = approved` tag on the model version in Unity Catalog. The task name must start with "approval" per MLflow 3 deployment job requirements.
-* **Deployment task fails**: Check serving endpoint status and permissions. The task promotes challenger → champion and updates the endpoint — verify the endpoint exists and the model version is valid.
+* **Approval task fails (expected)**: This is the normal human-in-the-loop gate. Click "Approve" on the UC model version page — the system sets the `approval_check` tag and **auto-repairs** the job run, re-running the approval task automatically. No manual re-run needed.
+* **Approval task fails (rejected)**: If the tag is explicitly set to `rejected`, the task raises `ValueError` with instructions. Update the tag to `approved` and re-run the deployment job.
+* **Deployment task fails (endpoint update)**: Check that the endpoint exists and the model version is valid. The task uses `update_config_and_wait()` with keyword args and preserves `environment_vars` — check for SDK version issues (`%pip install --upgrade databricks-sdk`).
+* **Deployment task fails (env_vars lost)**: The deployment notebook reads `environment_vars` from the current served entity and carries them forward. If secrets are missing, redeploy the bundle (the serving YAML defines the env vars).
+
+### Test Failures
+
+* **`test_epic_fhir_pyfunc.py` import error**: This file imports `mlflow` — ensure mlflow is installed in the test environment.
+* **Notebook workflow tests**: These tests (`test_*_notebook.py`) are self-contained with mocks and should pass without any external dependencies beyond `pytest` and `cryptography`.
+
+## Archived Notebooks
+
+The `src/_archive/` directory contains deprecated notebooks kept as reference:
+
+* **`update-serving-endpoint-config`**: Previously used to programmatically update the serving endpoint configuration (workload size, scale-to-zero, AI Gateway). Now fully superseded by the deployment notebook (`src/deployment`) for version updates and the bundle YAML (`resources/epic_on_fhir_requests.serving.yml`) for AI Gateway configuration.
 
 ## Documentation & Resources
 

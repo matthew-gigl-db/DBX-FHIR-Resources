@@ -34,7 +34,6 @@ resources:
             dependencies:
               - "mlflow>=3.0.0"
               - "databricks-sdk>=0.20.0"
-              - "databricks-agents>=0.1.0"
       
       tasks:
         # Task 1: Evaluate model against Epic FHIR sandbox
