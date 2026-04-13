@@ -95,7 +95,7 @@ Deployment Job → evaluate → approve → promote to "champion"
 | Task | Depends On | Purpose |
 | --- | --- | --- |
 | `evaluation` | — | Loads model by name/version, runs traced FHIR predictions (GET/POST), logs metrics (status codes, response time, pass/fail) to UC model version page |
-| `approval_check` | `evaluation` | Checks Unity Catalog tag `deployment.approval = 'approved'` on model version. Fails if not approved (human-in-the-loop gate). Task name starts with "approval" per MLflow 3 requirement. |
+| `approval_check` | `evaluation` | Checks Unity Catalog tag `approval_check = 'approved'` on model version. Fails if not approved (human-in-the-loop gate). Task name starts with "approval" per MLflow 3 requirement. |
 | `deployment` | `approval_check` | Promotes challenger → champion (rotates old champion → prior), updates serving endpoint version, configures AI Gateway/telemetry/tags |
 
 ## OAuth2 Authentication
@@ -184,7 +184,7 @@ databricks bundle run -t dev epic_on_fhir_model_registration
 # Set approval tag on the new model version (required for deployment job)
 # Replace <model_name> and <version> with actual values from the registration output
 databricks api post /api/2.0/mlflow/unity-catalog/model-versions/set-tag \
-  --json '{"name": "<model_name>", "version": "<version>", "key": "deployment.approval", "value": "approved"}'
+  --json '{"name": "<model_name>", "version": "<version>", "key": "approval_check", "value": "approved"}'
 
 # Run deployment job (evaluates, approves, promotes to champion, updates endpoint)
 databricks bundle run -t dev epic_on_fhir_model_deployment \
@@ -262,7 +262,7 @@ If Phase 1 failed partially (e.g., serving endpoint couldn't be created), Phase 
 #### Phase 4: Conditional Deployment Job
 
 Only runs if Phase 1 had partial failure (first-time deployment). The script:
-1. Auto-approves the model version by setting the `deployment.approval = approved` tag via the UC REST API
+1. Auto-approves the model version by setting the `approval_check = approved` tag via the UC REST API
 2. Runs the deployment job with `model_name` and `model_version` parameters
 
 ```
@@ -301,7 +301,7 @@ Phase 4: set approval tag + bundle run epic_on_fhir_model_deployment  (only if P
     │   ├─ Traced FHIR predictions (GET Patient, POST Observation, etc.)
     │   └─ Log metrics to UC model version page
     ├─ approval_check:
-    │   └─ Verify UC tag: deployment.approval = 'approved'
+    │   └─ Verify UC tag: approval_check = 'approved'
     └─ deployment:
         ├─ Promote challenger → champion (rotate prior)
         ├─ Update serving endpoint to new version
@@ -430,7 +430,7 @@ Canonical proxy URLs are defined in `databricks.yml` variables (`var.pip_index_u
 1. **Test in Sandbox**: Use Epic's sandbox environment (`client_id`)
 2. **Train Models**: Run experiments in dev workspace
 3. **Register Model**: Run registration job to register to Unity Catalog (sets "challenger" alias)
-4. **Approve Model**: Set `deployment.approval = approved` tag on the model version in Unity Catalog
+4. **Approve Model**: Set `approval_check = approved` tag on the model version in Unity Catalog
 5. **Deploy to Serving**: Deployment job auto-triggers — evaluates, promotes to "champion", updates endpoint
 6. **Production Deployment**: Use production credentials (`client_id_prod`)
 
@@ -471,7 +471,7 @@ Canonical proxy URLs are defined in `databricks.yml` variables (`var.pip_index_u
 ### Deployment Job Issues
 
 * **Evaluation task fails**: Check FHIR sandbox connectivity and model predictions. Metrics are logged to the UC model version page for debugging.
-* **Approval task fails**: Set the `deployment.approval = approved` tag on the model version in Unity Catalog. The task name must start with "approval" per MLflow 3 deployment job requirements.
+* **Approval task fails**: Set the `approval_check = approved` tag on the model version in Unity Catalog. The task name must start with "approval" per MLflow 3 deployment job requirements.
 * **Deployment task fails**: Check serving endpoint status and permissions. The task promotes challenger → champion and updates the endpoint — verify the endpoint exists and the model version is valid.
 
 ## Documentation & Resources

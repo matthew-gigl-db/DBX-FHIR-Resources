@@ -236,7 +236,7 @@ else
         echo "  ⚠ Could not extract model metadata from registration job output."
         echo "  Manual steps required:"
         echo "    1. Set approval tag on the model version in Unity Catalog:"
-        echo "       deployment.approval = approved"
+        echo "       approval_check = approved"
         echo "    2. Run the deployment job:"
         echo "       databricks bundle run -t ${TARGET} ${DEPLOYMENT_JOB} \\"
         echo "         --params model_name=<catalog.schema.model>,model_version=<version>"
@@ -245,7 +245,7 @@ else
 
         # Set the approval tag (required by the approval_check task)
         databricks api post /api/2.0/mlflow/unity-catalog/model-versions/set-tag \
-            --json "{\"name\": \"${MODEL_NAME}\", \"version\": \"${MODEL_VERSION}\", \"key\": \"deployment.approval\", \"value\": \"approved\"}" \
+            --json "{\"name\": \"${MODEL_NAME}\", \"version\": \"${MODEL_VERSION}\", \"key\": \"approval_check\", \"value\": \"approved\"}" \
             2>/dev/null || true
 
         echo "  ✓ Approval tag set."

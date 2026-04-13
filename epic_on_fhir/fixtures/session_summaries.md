@@ -99,7 +99,7 @@ bundle model version → models:/ URI → get_model_info() → model_id → set_
 ### 3. Approval Notebook (src/approval.ipynb) — 4 cells
 - **Parameters**: model_name, model_version
 - **Pattern**: Task name starts with "approval" (deployment job requirement)
-- **Check**: Unity Catalog tag `deployment.approval = 'approved'` on model version
+- **Check**: Unity Catalog tag `approval_check = 'approved'` on model version
 - **Fails task** if tag missing or not 'approved' (blocks deployment)
 
 ### 4. Deployment Notebook (src/deployment.ipynb) — 13 cells
