@@ -12,6 +12,8 @@ resources:
           default: "${resources.schemas.epic_on_fhir_schema.catalog_name}.${resources.schemas.epic_on_fhir_schema.name}.${resources.registered_models.epic_on_fhir_requests_model.name}"
         - name: model_version
           default: "1"
+        - name: approval_timeout_minutes
+          default: ${var.approval_timeout_minutes}
         - name: catalog
           default: ${resources.schemas.epic_on_fhir_schema.catalog_name}
         - name: schema
@@ -46,6 +48,7 @@ resources:
         
         # Task 2: Check Unity Catalog tag for manual approval
         # Task name MUST start with "approval" (MLflow 3 deployment job requirement)
+        # Polls every 30s for up to approval_timeout_minutes (default from var)
         - task_key: approval_check
           depends_on:
             - task_key: evaluation
@@ -54,6 +57,7 @@ resources:
             base_parameters:
               model_name: "{{job.parameters.model_name}}"
               model_version: "{{job.parameters.model_version}}"
+              approval_timeout_minutes: "{{job.parameters.approval_timeout_minutes}}"
           environment_key: default
         
         # Task 3: Deploy approved model (promote to champion, update endpoint)
