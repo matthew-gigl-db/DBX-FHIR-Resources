@@ -12,6 +12,8 @@ resources:
           default: "${resources.schemas.epic_on_fhir_schema.catalog_name}.${resources.schemas.epic_on_fhir_schema.name}.${resources.registered_models.epic_on_fhir_requests_model.name}"
         - name: model_version
           default: "1"
+        - name: mlflow_experiment_name
+          default: ${resources.experiments.epic_on_fhir_requests_experiment.name}
         - name: approval_timeout_minutes
           default: ${var.approval_timeout_minutes}
         - name: catalog
@@ -44,6 +46,7 @@ resources:
             base_parameters:
               model_name: "{{job.parameters.model_name}}"
               model_version: "{{job.parameters.model_version}}"
+              mlflow_experiment_name: "{{job.parameters.mlflow_experiment_name}}"
           environment_key: default
         
         # Task 2: Check Unity Catalog tag for manual approval
