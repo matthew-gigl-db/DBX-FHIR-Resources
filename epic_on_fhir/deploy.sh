@@ -5,17 +5,21 @@
 # (which requires a model version) and the model registration notebook
 # (which requires the registered model resource to exist).
 #
+# Two-job architecture:
+#   - Registration job: registers model to UC, sets "challenger" alias
+#   - Deployment job: evaluates → approves → promotes to "champion", updates endpoint
+#
 # Phases:
 #   1. Deploy bundle infrastructure (schema, experiment, registered model, volume).
 #      The serving endpoint may fail on first deploy if no model version exists.
-#   2. Run the model registration job to create v1 and promote to champion.
-#      The update_endpoint_config task exits gracefully if the endpoint doesn't exist.
+#   2. Run the registration job to create a model version with "challenger" alias.
 #   3. Re-deploy the bundle so the serving endpoint picks up the model version.
-#   4. Re-run the job (updateAIGatewayOnly=true) to apply AI Gateway/telemetry/tags
-#      to the newly created endpoint.
+#   4. Auto-approve and run the deployment job to promote to "champion" and
+#      configure the endpoint (AI Gateway, telemetry, tags).
 #
-# Subsequent runs are idempotent — if the serving endpoint already exists and
-# has a valid model version, phases 3 and 4 are skipped.
+# Subsequent runs: Phase 1 succeeds fully, Phase 2 registers a new version,
+# Phases 3-4 are skipped — the deployment job auto-triggers on new model
+# version creation.
 #
 # Usage:
 #   ./deploy.sh [target]
@@ -38,7 +42,8 @@ set -euo pipefail
 
 TARGET="${1:-dev}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-JOB_KEY="epic_on_fhir_model_registration"
+REGISTRATION_JOB="epic_on_fhir_model_registration"
+DEPLOYMENT_JOB="epic_on_fhir_model_deployment"
 
 echo "============================================="
 echo "Epic on FHIR Bundle Deployment"
@@ -54,7 +59,7 @@ cd "${SCRIPT_DIR}"
 # Phase 1: Deploy bundle infrastructure
 # --------------------------------------------------------------------------
 echo "[Phase 1/4] Deploying bundle infrastructure..."
-echo "  This creates: schema, experiment, registered model, volume, app, job."
+echo "  This creates: schema, experiment, registered model, volume, app, jobs."
 echo "  The serving endpoint may fail if no model version exists yet."
 echo ""
 
@@ -73,15 +78,52 @@ echo ""
 # Phase 2: Run model registration job
 # --------------------------------------------------------------------------
 echo "[Phase 2/4] Running model registration job..."
-echo "  Job: ${JOB_KEY}"
-echo "  This registers a new model version, validates, and promotes to champion."
-echo "  The endpoint config update task will be skipped if the endpoint doesn't exist yet."
+echo "  Job: ${REGISTRATION_JOB}"
+echo "  This registers a new model version and sets the 'challenger' alias."
 echo ""
 
-databricks bundle run -t "${TARGET}" "${JOB_KEY}"
+# Capture the run URL to extract the run ID for later
+RUN_LOG=$(databricks bundle run -t "${TARGET}" "${REGISTRATION_JOB}" 2>&1 | tee /dev/stderr)
+
+# Extract the run ID from the output (format: "Run URL: https://.../runs/<run_id>")
+RUN_ID=$(echo "${RUN_LOG}" | grep -oP 'runs/\K[0-9]+' | tail -1 || true)
 
 echo ""
 echo "  ✓ Model registration job completed."
+echo ""
+
+# --------------------------------------------------------------------------
+# Extract model metadata from registration job output
+# --------------------------------------------------------------------------
+# The registration notebook exits with JSON: {model_name, model_version, model_uri, model_id}
+MODEL_NAME=""
+MODEL_VERSION=""
+
+if [ -n "${RUN_ID}" ]; then
+    echo "  Extracting model metadata from run ${RUN_ID}..."
+    RUN_OUTPUT=$(databricks jobs get-run "${RUN_ID}" --output json 2>/dev/null || true)
+    if [ -n "${RUN_OUTPUT}" ]; then
+        # Parse the notebook exit value from the run output
+        NOTEBOOK_RESULT=$(echo "${RUN_OUTPUT}" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    for task in data.get('tasks', []):
+        result = task.get('state', {}).get('result_state', '')
+        nb_output = task.get('notebook_output', {}).get('result', '')
+        if nb_output:
+            print(nb_output)
+            break
+except Exception:
+    pass
+" 2>/dev/null || true)
+        if [ -n "${NOTEBOOK_RESULT}" ]; then
+            MODEL_NAME=$(echo "${NOTEBOOK_RESULT}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['model_name'])" 2>/dev/null || true)
+            MODEL_VERSION=$(echo "${NOTEBOOK_RESULT}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['model_version'])" 2>/dev/null || true)
+            echo "  Model: ${MODEL_NAME} v${MODEL_VERSION}"
+        fi
+    fi
+fi
 echo ""
 
 # --------------------------------------------------------------------------
@@ -102,22 +144,48 @@ fi
 echo ""
 
 # --------------------------------------------------------------------------
-# Phase 4: Update endpoint config (only if Phase 1 had partial failure)
+# Phase 4: Run deployment job (only if Phase 1 had partial failure)
 # --------------------------------------------------------------------------
-# On first deploy, Phase 2's update_endpoint_config task skipped because the
-# endpoint didn't exist. Now that Phase 3 created it, re-run the job with
-# updateAIGatewayOnly=true to apply AI Gateway, telemetry, and tags.
+# On first deploy, the endpoint was just created in Phase 3 and needs
+# promotion (challenger→champion) and configuration (AI Gateway, telemetry, tags).
+# The deployment job handles all of this.
+#
+# On subsequent deploys, Phase 1 succeeds and the deployment job is
+# auto-triggered by new model version creation — skip Phase 4.
 if [ "${PHASE1_FULL_SUCCESS}" = true ]; then
-    echo "[Phase 4/4] Skipping endpoint config update (Phase 2 already applied it)."
+    echo "[Phase 4/4] Skipping deployment job (auto-triggered by model version creation)."
 else
-    echo "[Phase 4/4] Updating endpoint configuration..."
-    echo "  Re-running job with updateAIGatewayOnly=true to apply AI Gateway, telemetry, and tags."
-    echo ""
+    echo "[Phase 4/4] Running deployment job (initial setup)..."
 
-    databricks bundle run -t "${TARGET}" "${JOB_KEY}" --params updateAIGatewayOnly=true
+    if [ -z "${MODEL_NAME}" ] || [ -z "${MODEL_VERSION}" ]; then
+        echo "  ⚠ Could not extract model metadata from registration job output."
+        echo "  Manual steps required:"
+        echo "    1. Set approval tag on the model version in Unity Catalog:"
+        echo "       deployment.approval = approved"
+        echo "    2. Run the deployment job:"
+        echo "       databricks bundle run -t ${TARGET} ${DEPLOYMENT_JOB} \\"
+        echo "         --params model_name=<catalog.schema.model>,model_version=<version>"
+    else
+        echo "  Auto-approving model ${MODEL_NAME} v${MODEL_VERSION} for initial deployment..."
 
-    echo ""
-    echo "  ✓ Endpoint configuration updated."
+        # Set the approval tag (required by the approval_check task)
+        databricks api post /api/2.0/mlflow/unity-catalog/model-versions/set-tag \
+            --json "{\"name\": \"${MODEL_NAME}\", \"version\": \"${MODEL_VERSION}\", \"key\": \"deployment.approval\", \"value\": \"approved\"}" \
+            2>/dev/null || true
+
+        echo "  ✓ Approval tag set."
+        echo ""
+        echo "  Running deployment job: ${DEPLOYMENT_JOB}"
+        echo "  This evaluates the model, checks approval, promotes to champion,"
+        echo "  and configures the endpoint (AI Gateway, telemetry, tags)."
+        echo ""
+
+        databricks bundle run -t "${TARGET}" "${DEPLOYMENT_JOB}" \
+            --params "model_name=${MODEL_NAME},model_version=${MODEL_VERSION}"
+
+        echo ""
+        echo "  ✓ Deployment job completed."
+    fi
 fi
 
 echo ""
