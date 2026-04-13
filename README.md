@@ -55,7 +55,8 @@ synthea-on-fhir/
 * **Databricks App**: JWK URL service for OAuth (`jwk_url.app.yml`)
 * **Unity Catalog Schema**: `epic_on_fhir` schema (`epic_on_fhir.schema.yml`)
 * **Volume**: MLflow artifacts storage (`mlflow_artifacts.volume.yml`)
-* **Job**: Sample processing job (`sample_job.job.yml`)
+* **Registration Job**: Model registration and UC alias management (`epic_on_fhir_model_registration.job.yml`)
+* **Deployment Job**: MLflow 3 evaluation, approval, and promotion (`epic_on_fhir_model_deployment.job.yml`)
 
 **Authentication**: RS384 JWT-based OAuth2 with Epic's FHIR endpoints
 

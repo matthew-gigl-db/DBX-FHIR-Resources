@@ -15,6 +15,7 @@ This asset bundle provides production-ready integration with Epic's FHIR endpoin
 * **JWK Hosting**: Databricks App for serving JSON Web Keys (JWKs)
 * **Unity Catalog Storage**: Secure storage of FHIR resources
 * **MLflow Tracking**: Experiment tracking for model development
+* **MLflow 3 Deployment Jobs**: Evaluation, human-in-the-loop approval, and automated promotion
 
 ## Architecture
 
@@ -27,8 +28,10 @@ FHIR Data Storage (epic_on_fhir schema)
     ↓ MLflow
 Model Training & Experimentation
     ↓ Model Registry
-Model Serving Endpoint
-    → Real-time FHIR Request API
+Registration Job → sets "challenger" alias
+    ↓ Triggers deployment job
+Deployment Job → evaluate → approve → promote to "champion"
+    → Model Serving Endpoint (Real-time FHIR Request API)
 ```
 
 ## Bundle Resources
@@ -69,20 +72,31 @@ Model Serving Endpoint
 
 ### 7. Model Registration Job
 **Resource**: `epic_on_fhir_model_registration.job.yml`  
-**Purpose**: Registers a new model version, validates, promotes to champion, and updates the serving endpoint configuration  
+**Purpose**: Registers a new model version to Unity Catalog with the "challenger" alias  
 **Compute**: Serverless (shared environment with mlflow and databricks-sdk)  
 **Trigger**: On-demand via `deploy.sh` or `databricks bundle run`  
-**Conditional execution** via `updateAIGatewayOnly` parameter:
-* `false` (default): Full deployment — register model, then update endpoint config
-* `true`: Config-only — skip model registration, only update AI Gateway/telemetry/tags
+**Concurrency**: `max_concurrent_runs: 1`
 
 **Tasks**:
 
-| Task | Condition | Purpose |
+| Task | Purpose |
+| --- | --- |
+| `register_model` | Runs `epic-on-fhir-requests-model.ipynb` — builds pyfunc, logs to MLflow, registers to UC, sets "challenger" alias, exits with model metadata JSON |
+
+### 8. Model Deployment Job
+**Resource**: `epic_on_fhir_model_deployment.job.yml`  
+**Purpose**: MLflow 3 deployment job — evaluates, approves, and promotes a model version from "challenger" to "champion"  
+**Compute**: Serverless (shared environment with mlflow, databricks-sdk, databricks-agents)  
+**Trigger**: Auto-triggered on new model version creation, or on-demand  
+**Concurrency**: `max_concurrent_runs: 1`
+
+**Tasks**:
+
+| Task | Depends On | Purpose |
 | --- | --- | --- |
-| `check_update_mode` | Always runs | Evaluates `updateAIGatewayOnly` parameter |
-| `register_and_promote_model` | Runs if `updateAIGatewayOnly=false` | Model registration, validation, promotion |
-| `update_endpoint_config` | Runs after all tasks complete (`run_if: ALL_DONE`) | Updates AI Gateway, telemetry, tags via SDK |
+| `evaluation` | — | Loads model by name/version, runs traced FHIR predictions (GET/POST), logs metrics (status codes, response time, pass/fail) to UC model version page |
+| `approval_check` | `evaluation` | Checks Unity Catalog tag `deployment.approval = 'approved'` on model version. Fails if not approved (human-in-the-loop gate). Task name starts with "approval" per MLflow 3 requirement. |
+| `deployment` | `approval_check` | Promotes challenger → champion (rotates old champion → prior), updates serving endpoint version, configures AI Gateway/telemetry/tags |
 
 ## OAuth2 Authentication
 
@@ -164,15 +178,22 @@ databricks bundle validate -t dev
 # Deploy infrastructure only
 databricks bundle deploy -t dev
 
-# Run model registration job (full deployment)
+# Run model registration job (registers model, sets "challenger" alias)
 databricks bundle run -t dev epic_on_fhir_model_registration
 
-# Or update endpoint config only (no model registration)
-databricks bundle run -t dev epic_on_fhir_model_registration --params updateAIGatewayOnly=true
+# Set approval tag on the new model version (required for deployment job)
+# Replace <model_name> and <version> with actual values from the registration output
+databricks api post /api/2.0/mlflow/unity-catalog/model-versions/set-tag \
+  --json '{"name": "<model_name>", "version": "<version>", "key": "deployment.approval", "value": "approved"}'
+
+# Run deployment job (evaluates, approves, promotes to champion, updates endpoint)
+databricks bundle run -t dev epic_on_fhir_model_deployment \
+  --params "model_name=<model_name>,model_version=<version>"
 ```
 
 > **Note**: Manual deployment requires understanding the chicken-and-egg dependency
-> between the serving endpoint and model registration. The deploy script handles this
+> between the serving endpoint and model registration, plus setting the approval tag
+> before the deployment job can proceed. The deploy script handles all of this
 > automatically. See the deploy script section for details.
 
 ### 4. Access Resources
@@ -214,7 +235,7 @@ The script runs four phases to handle the chicken-and-egg dependency between the
 databricks bundle deploy -t <target>
 ```
 
-Creates all bundle resources: schema, experiment, registered model, volume, app, job, and serving endpoint. On **first deployment**, the serving endpoint may fail because no model version exists yet — this is expected.
+Creates all bundle resources: schema, experiment, registered model, volume, app, jobs, and serving endpoint. On **first deployment**, the serving endpoint may fail because no model version exists yet — this is expected.
 
 #### Phase 2: Run Model Registration Job
 
@@ -222,16 +243,13 @@ Creates all bundle resources: schema, experiment, registered model, volume, app,
 databricks bundle run -t <target> epic_on_fhir_model_registration
 ```
 
-Runs the job with default parameters (`updateAIGatewayOnly=false`). The `register_and_promote_model` task runs the `epic-on-fhir-requests-model` notebook on serverless compute:
+Runs the registration job, which executes the `epic-on-fhir-requests-model` notebook on serverless compute:
 1. Builds the `EpicFhirPyfuncModel` pyfunc
 2. Logs and registers a new model version in Unity Catalog
-3. Sets challenger alias on the new version
-4. Validates with traced predictions against Epic's sandbox (GET and POST payloads)
-5. Validates JSON serialization of responses
-6. Promotes challenger → champion (rotates prior champion to "prior" alias)
-7. Finds and updates the serving endpoint to serve the new champion version
+3. Sets the "challenger" alias on the new version
+4. Exits with model metadata JSON (`model_name`, `model_version`, `model_uri`, `model_id`)
 
-The `update_endpoint_config` task then runs to apply AI Gateway, telemetry, and tag settings. On **first deployment**, this task exits gracefully if the endpoint doesn't exist yet (the notebook detects this and calls `dbutils.notebook.exit()`).
+The script captures the run output and extracts the model name and version for Phase 4.
 
 #### Phase 3: Conditional Re-deploy
 
@@ -241,40 +259,52 @@ databricks bundle deploy -t <target>   # only if Phase 1 had partial failure
 
 If Phase 1 failed partially (e.g., serving endpoint couldn't be created), Phase 3 re-deploys the bundle. Now that a model version exists from Phase 2, the serving endpoint creation succeeds.
 
-#### Phase 4: Conditional Endpoint Config Update
+#### Phase 4: Conditional Deployment Job
+
+Only runs if Phase 1 had partial failure (first-time deployment). The script:
+1. Auto-approves the model version by setting the `deployment.approval = approved` tag via the UC REST API
+2. Runs the deployment job with `model_name` and `model_version` parameters
 
 ```
-databricks bundle run -t <target> epic_on_fhir_model_registration --params updateAIGatewayOnly=true
+databricks api post /api/2.0/mlflow/unity-catalog/model-versions/set-tag ...
+databricks bundle run -t <target> epic_on_fhir_model_deployment \
+  --params "model_name=<name>,model_version=<version>"
 ```
 
-Only runs if Phase 1 had partial failure. On first deployment, Phase 2's `update_endpoint_config` task skipped because the endpoint didn't exist. Now that Phase 3 created it, Phase 4 re-runs the job with `updateAIGatewayOnly=true` to apply AI Gateway, telemetry, and tags without re-registering the model.
+The deployment job then:
+1. **Evaluates** the model against the Epic FHIR sandbox (traced predictions, metrics)
+2. **Checks approval** via the UC tag (passes because deploy.sh auto-approved)
+3. **Deploys**: promotes challenger → champion, updates serving endpoint, configures AI Gateway/telemetry/tags
 
-**On subsequent runs**, Phase 1 fully succeeds (model version already exists), so Phases 3 and 4 are skipped — the script is idempotent.
+**On subsequent runs**, Phase 1 fully succeeds (model version already exists), so Phases 3 and 4 are skipped. The deployment job auto-triggers on new model version creation.
 
 ### Flow Diagram
 
 ```
 Phase 1: bundle deploy
-    ├─ schema, experiment, registered model, volume, app, job  ✓
+    ├─ schema, experiment, registered model, volume, app, jobs  ✓
     └─ serving endpoint  ✓ (or ⚠ if no model version yet)
          │
 Phase 2: bundle run epic_on_fhir_model_registration
-    ├─ check_update_mode → false (full deployment)
-    ├─ register_and_promote_model:
-    │   ├─ Register model v(N) → set challenger alias
-    │   ├─ Validate with traced predictions
-    │   ├─ Promote challenger → champion (rotate prior)
-    │   └─ Update serving endpoint to v(N)
-    └─ update_endpoint_config:
-        └─ ✓ (or ⚠ SKIPPED if endpoint doesn't exist yet)
+    └─ register_model:
+        ├─ Build pyfunc model
+        ├─ Log and register to Unity Catalog
+        ├─ Set "challenger" alias
+        └─ Exit with model metadata (name, version)
          │
 Phase 3: bundle deploy  (only if Phase 1 was partial)
     └─ serving endpoint  ✓ (model version now exists)
          │
-Phase 4: bundle run --params updateAIGatewayOnly=true  (only if Phase 1 was partial)
-    ├─ check_update_mode → true (config-only)
-    ├─ register_and_promote_model → SKIPPED
-    └─ update_endpoint_config:
+Phase 4: set approval tag + bundle run epic_on_fhir_model_deployment  (only if Phase 1 was partial)
+    ├─ evaluation:
+    │   ├─ Load model by name/version
+    │   ├─ Traced FHIR predictions (GET Patient, POST Observation, etc.)
+    │   └─ Log metrics to UC model version page
+    ├─ approval_check:
+    │   └─ Verify UC tag: deployment.approval = 'approved'
+    └─ deployment:
+        ├─ Promote challenger → champion (rotate prior)
+        ├─ Update serving endpoint to new version
         ├─ AI Gateway (inference tables, usage tracking, rate limits)
         ├─ Telemetry (OTel traces, logs, metrics tables)
         └─ Tags (component, environment, project, owner)
@@ -288,24 +318,36 @@ Phase 4: bundle run --params updateAIGatewayOnly=true  (only if Phase 1 was part
 
 ### Job Parameters
 
-The model registration job accepts these parameters (all have bundle-resolved defaults):
+#### Registration Job (`epic_on_fhir_model_registration`)
 
 | Parameter | Default Source | Description |
 | --- | --- | --- |
+| `secret_scope_name` | `var.secret_scope_name` | Secret scope for Epic OAuth2 credentials |
+| `client_id_dbs_key` | `var.client_id_dbs_key` | Secret key name for Epic client ID |
+| `algo` | `var.algo` | JWT encryption algorithm (RS384) |
+| `token_url` | `var.token_url` | Epic OAuth2 token endpoint |
+| `mlflow_experiment_name` | `resources.experiments...name` | MLflow experiment path |
+| `pip_index_url` | `var.pip_index_url` | Package index URL (local dev only) |
+| `registered_model_name` | `resources.schemas...catalog_name`.`schemas...name`.`registered_models...name` | Full 3-level UC model namespace |
+
+#### Deployment Job (`epic_on_fhir_model_deployment`)
+
+| Parameter | Default Source | Description |
+| --- | --- | --- |
+| `model_name` | *(required, no default)* | Full 3-level UC model name (e.g., `catalog.schema.model`) |
+| `model_version` | *(required, no default)* | Model version number to deploy |
 | `catalog` | `resources.schemas...catalog_name` | Unity Catalog catalog name |
 | `schema` | `resources.schemas...name` | Unity Catalog schema name |
-| `registered_model_name` | `resources.schemas...catalog_name`.`schemas...name`.`registered_models...name` | Full 3-level UC model namespace |
 | `endpoint_name` | `resources.model_serving_endpoints...name` | Serving endpoint name |
-| `updateAIGatewayOnly` | `"false"` | Skip model registration, only update endpoint config |
-
-The `register_and_promote_model` task passes `registered_model_name` to the notebook. The `update_endpoint_config` task passes `endpoint_name`, `catalog`, `schema`, and tag values.
+| `tags` | JSON from bundle variables | Deployment metadata tags |
 
 ### Package Dependencies
 
 The serverless environment installs these packages (from Databricks' own package mirror — **not** the PyPI proxy):
 
-* `mlflow>=2.10.0` — Model logging and registry
+* `mlflow>=3.0.0` — Model logging, registry, and deployment job integration
 * `databricks-sdk>=0.20.0` — Serving endpoint management
+* `databricks-agents>=0.1.0` — Agent evaluation framework (deployment job only)
 
 > **Important**: Do not add `--index-url` or `--extra-index-url` to the serverless
 > environment dependencies. Serverless compute, Databricks Apps, and model serving all
@@ -387,15 +429,17 @@ Canonical proxy URLs are defined in `databricks.yml` variables (`var.pip_index_u
 
 1. **Test in Sandbox**: Use Epic's sandbox environment (`client_id`)
 2. **Train Models**: Run experiments in dev workspace
-3. **Register Model**: Promote to Unity Catalog model registry
-4. **Deploy to Serving**: Create model serving endpoint
-5. **Production Deployment**: Use production credentials (`client_id_prod`)
+3. **Register Model**: Run registration job to register to Unity Catalog (sets "challenger" alias)
+4. **Approve Model**: Set `deployment.approval = approved` tag on the model version in Unity Catalog
+5. **Deploy to Serving**: Deployment job auto-triggers — evaluates, promotes to "champion", updates endpoint
+6. **Production Deployment**: Use production credentials (`client_id_prod`)
 
 ## Monitoring & Observability
 
 * **Model Serving Metrics**: Request latency, throughput, error rates
 * **MLflow Tracking**: Model performance, experiment comparisons
-* **MLflow Tracing**: Traced predictions during validation for debugging
+* **MLflow Tracing**: Traced predictions during evaluation for debugging
+* **UC Model Version Metrics**: Evaluation metrics logged directly to model version page
 * **AI Gateway Inference Tables**: Request/response payload logging for audit
 * **OpenTelemetry**: Traces, logs, and metrics persisted to Unity Catalog Delta tables
 * **Unity Catalog Lineage**: Data flow from Epic to downstream tables
@@ -419,9 +463,16 @@ Canonical proxy URLs are defined in `databricks.yml` variables (`var.pip_index_u
 ### Deploy Script Failures
 
 * **Phase 1 partial failure**: Expected on first deploy (serving endpoint needs a model version). Phases 3 and 4 will handle it.
-* **Phase 2 failure**: Check notebook cell output in the job run. Common causes: secret scope not configured, Epic sandbox unreachable, MLflow experiment permissions. The `update_endpoint_config` task exits gracefully if the endpoint doesn't exist yet — this is normal on first deploy.
-* **Phase 4 failure**: The endpoint exists (Phase 3 created it) but the SDK calls failed. Check the `update-serving-endpoint-config` notebook output for API errors.
+* **Phase 2 failure**: Check notebook cell output in the job run. Common causes: secret scope not configured, Epic sandbox unreachable, MLflow experiment permissions.
+* **Phase 4 failure (metadata extraction)**: If the script cannot extract model metadata from the registration run, it prints manual commands. Run them to complete initial setup.
+* **Phase 4 failure (deployment job)**: Check the individual task outputs — `evaluation` (FHIR sandbox connectivity), `approval_check` (UC tag missing), `deployment` (endpoint update API errors).
 * **Package install timeout**: Do **not** add `--extra-index-url` to serverless dependencies. The proxy is unreachable from serverless compute.
+
+### Deployment Job Issues
+
+* **Evaluation task fails**: Check FHIR sandbox connectivity and model predictions. Metrics are logged to the UC model version page for debugging.
+* **Approval task fails**: Set the `deployment.approval = approved` tag on the model version in Unity Catalog. The task name must start with "approval" per MLflow 3 deployment job requirements.
+* **Deployment task fails**: Check serving endpoint status and permissions. The task promotes challenger → champion and updates the endpoint — verify the endpoint exists and the model version is valid.
 
 ## Documentation & Resources
 
