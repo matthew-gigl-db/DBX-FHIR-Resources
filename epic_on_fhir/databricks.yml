@@ -11,6 +11,7 @@ include:
   - resources/*experiment.yml
   - resources/*model.yml
   - resources/*.volume.yml
+  - resources/*job.yml
   - resources/*/*.yml
 
 # Variable declarations. These variables are assigned in the dev/prod targets below.
@@ -38,13 +39,29 @@ variables:
     default: 47c0365e-b1af-429c-b56d-07cfb18b5dc7
   serverless_environment_version:
     description: The serverless environment for which to run the workflows, notebook tasks, etc. 
-    default: 4
+    default: 5
   dashboard_embed_credentials:
     description: Set to true if the dashboard should use the owner's credentials, or false if the user's credentials should be used to run the dashboard and access Unity Catalog assets.  
     default: false
   model_deployment_version:
     description: The version of the model to deploy with the bundle
     default: "1"
+  pip_index_url:
+    description: >-
+      Canonical pip index URL for all package installations (jobs, apps, model serving).
+      Also mirrored manually in: pyproject.toml [[tool.uv.index]], src/jwk_url_app/requirements.txt.
+    default: https://pypi-proxy.dev.databricks.com/simple/
+  npm_registry_url:
+    description: >-
+      Canonical npm registry URL. Mirrored manually in .npmrc (not DAB-processed).
+    default: https://npm-proxy.dev.databricks.com/
+  enable_otel_instrumentation:
+    description: >-
+      Enable OpenTelemetry SDK instrumentation (custom metrics and traces) in the
+      pyfunc model on the serving endpoint. Requires endpoint telemetry_config to be
+      set. This is a Preview feature — set to "true" to opt in per target.
+      Standard Python logging to _otel_logs works regardless of this setting.
+    default: "false"
   tags_project: 
     default: Open Epic Smart on FHIR
     description: Project tag to use for deployed resources.  
@@ -95,7 +112,7 @@ targets:
             prevent_destroy: true
       experiments:
         epic_on_fhir_requests_experiment:
-          name: /Workspace/experiments/epic_on_fhir_requests
+          name: /Workspace/.experiments/epic_on_fhir_requests
           permissions:
           - level: CAN_READ
             group_name: users
@@ -145,7 +162,7 @@ targets:
             prevent_destroy: true
       experiments:
         epic_on_fhir_requests_experiment:
-          name: /Workspace/experiments/epic_on_fhir_requests
+          name: /Workspace/.experiments/epic_on_fhir_requests
           permissions:
           - level: CAN_READ
             group_name: users
@@ -219,7 +236,8 @@ targets:
       higher_level_service_principal: acf021b4-87c6-44ff-b3d7-45c59d63fe4d
       run_as_user: ${var.higher_level_service_principal}
       client_id_dbs_key: client_id
-      model_deployment_version: "1"
+      model_deployment_version: "2"
+      enable_otel_instrumentation: "true"
     permissions:
       - user_name: matthew.giglia@databricks.com
         level: CAN_MANAGE

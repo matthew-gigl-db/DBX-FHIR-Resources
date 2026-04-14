@@ -13,6 +13,8 @@ resources:
             value: ${var.algo}
           - name: SECRET_SCOPE_NAME
             value: ${var.secret_scope_name}
+          # Note: PIP_INDEX_URL is NOT set here. Databricks Apps run on managed
+          # infrastructure with their own package mirror. The proxy is unreachable.
       resources:
         - name: "epic-on-fhir-public-key"
           description: "EPIC on FHIR Authentication Public Key"
@@ -26,4 +28,3 @@ resources:
             scope: ${var.secret_scope_name}
             key: kid
             permission: "READ"
-      
