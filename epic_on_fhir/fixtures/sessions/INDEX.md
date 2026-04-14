@@ -9,6 +9,7 @@ working session: problems, root causes, changes, and design decisions.
 
 | Date | Session | File |
 | --- | --- | --- |
+| 2026-04-14 | Notebook Workflow Tests & README Overhaul | [2026-04-14_notebook-tests-readme-update.md](2026-04-14_notebook-tests-readme-update.md) |
 | 2026-04-13 | Session Summaries Migration to Per-File Structure | [2026-04-13_session-summaries-migration.md](2026-04-13_session-summaries-migration.md) |
 | 2026-04-13 | Deployment Notebook Fixes & SDK Install Convention | [2026-04-13_deployment-notebook-fixes-sdk-convention.md](2026-04-13_deployment-notebook-fixes-sdk-convention.md) |
 | 2026-04-13 | MLflow 3 Approval Tag Convention & Timeout Removal | [2026-04-13_approval-tag-convention-timeout-removal.md](2026-04-13_approval-tag-convention-timeout-removal.md) |
