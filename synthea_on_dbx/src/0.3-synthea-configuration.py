@@ -63,7 +63,8 @@ dbutils.widgets.dropdown(name = "csv", defaultValue = "true", choices = ("true",
 dbutils.widgets.dropdown(name = "csv_folder_per_run", defaultValue = "true", choices = ("true", "false"), label="CSV Folder Per Run")
 dbutils.widgets.text(name = "destination", defaultValue="./output/", label = "Base Directory")
 # end_date caps the simulation timeline to prevent "Person does not have insurance" errors from the CCDA exporter
-dbutils.widgets.text(name = "end_date", defaultValue = date.today().strftime("%Y%m%d"), label = "Simulation End Date")
+# Defaults to Dec 31 of the previous year to stay within Synthea's payer data coverage
+dbutils.widgets.text(name = "end_date", defaultValue = f"{date.today().year - 1}1231", label = "Simulation End Date")
 
 # COMMAND ----------
 
