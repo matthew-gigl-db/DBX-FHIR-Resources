@@ -15,7 +15,7 @@ resources:
       # Trigger on new FHIR bundle files arriving in the source volume
       trigger:
         file_arrival:
-          url: /Volumes/${var.catalog}/synthea_data_gen/synthetic_files_raw/output/fhir/
+          url: /Volumes/${var.source_catalog}/synthea_data_gen/synthetic_files_raw/output/fhir/
           min_time_between_triggers_seconds: 600
           wait_after_last_change_seconds: 60
 

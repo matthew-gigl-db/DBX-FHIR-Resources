@@ -16,6 +16,8 @@ variables:
     description: The schema to use
   schema_resolved:
     description: The schema, as its resolved from the target
+  source_catalog:
+    description: The catalog containing the synthea source data (synthea_data_gen schema)
   landing_volume:
     description: The name of the volume for landing the FHIR bundles
     default: landing
@@ -61,7 +63,7 @@ targets:
         RemoveAfter: ${var.tags_RemoveAfter}
         env: ${bundle.target}
     workspace:
-      host: https://fevm-hls-fde.cloud.databricks.com
+      host: https://fevm-hedis.cloud.databricks.com
       root_path: /Workspace/Users/${var.run_as_user}/.bundle/${bundle.name}/${bundle.target}
     resources:
       schemas:
@@ -75,10 +77,56 @@ targets:
           catalog_name: ${var.catalog}
           schema_name: ${var.schema_resolved}
     variables:
-      catalog: hls_fde
+      catalog: ncqai
       schema: fhir
       schema_resolved: ${bundle.target}_${workspace.current_user.short_name}_${var.schema}
+      source_catalog: ncqai
       run_as_user: matthew.giglia@databricks.com
+
+  hedis:
+    # Production target for the fevm-hedis workspace using the ncqai catalog.
+    mode: production
+    presets:
+      source_linked_deployment: false
+      tags:
+        project: ${var.tags_project}
+        businessUnit: ${var.tags_businessUnit}
+        requestedBy: ${var.tags_requestedBy}
+        developer: ${var.tags_developer}
+        RemoveAfter: ${var.tags_RemoveAfter}
+        env: ${bundle.target}
+    workspace:
+      host: https://fevm-hedis.cloud.databricks.com
+      root_path: /Workspace/.bundle/${bundle.name}/${bundle.target}
+    resources:
+      schemas:
+        fhir_schema:
+          name: ${var.schema_resolved}
+          catalog_name: ${var.catalog}
+          comment: FHIR schema for the FHIR Declarative Pipeline project
+      volumes:
+        landing_volume:
+          name: ${var.landing_volume}
+          catalog_name: ${var.catalog}
+          schema_name: ${var.schema_resolved}
+      jobs:
+        fhir_bundle_mover_job:
+          run_as:
+            service_principal_name: ${var.run_as_user}
+    variables:
+      catalog: ncqai
+      schema: fhir
+      schema_resolved: ${var.schema}
+      source_catalog: ncqai
+      higher_level_service_principal: acf021b4-87c6-44ff-b3d7-45c59d63fe4d
+      run_as_user: ${var.higher_level_service_principal}
+    permissions:
+      - user_name: matthew.giglia@databricks.com
+        level: CAN_MANAGE
+      - group_name: users
+        level: CAN_RUN
+      - service_principal_name: ${var.run_as_user}
+        level: CAN_MANAGE
 
   hls_fde:
     mode: production
@@ -108,6 +156,7 @@ targets:
       catalog: hls_fde
       schema: fhir
       schema_resolved: ${var.schema}
+      source_catalog: hls_fde
       higher_level_service_principal: acf021b4-87c6-44ff-b3d7-45c59d63fe4d
       run_as_user: ${var.higher_level_service_principal}
     permissions:
@@ -117,5 +166,3 @@ targets:
         level: CAN_RUN
       - service_principal_name: ${var.run_as_user}
         level: CAN_MANAGE
-
-

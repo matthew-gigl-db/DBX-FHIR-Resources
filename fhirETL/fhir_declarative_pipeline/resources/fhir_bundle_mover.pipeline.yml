@@ -28,7 +28,7 @@ resources:
             include: ../src/fhir_bundle_mover/transformations/**
 
       configuration:
-        pipeline.source_volume_path: "/Volumes/${var.catalog}/synthea_data_gen/synthetic_files_raw/output/fhir/"
+        pipeline.source_volume_path: "/Volumes/${var.source_catalog}/synthea_data_gen/synthetic_files_raw/output/fhir/"
         pipeline.dest_volume_path: "/Volumes/${var.catalog}/${var.schema_resolved}/${var.landing_volume}"
 
       event_log:
