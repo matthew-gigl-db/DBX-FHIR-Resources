@@ -162,6 +162,10 @@ targets:
         level: CAN_MANAGE
       - group_name: users
         level: CAN_VIEW
+      - service_principal_name: ${var.higher_level_service_principal}
+        level: CAN_EDIT
+      - service_principal_name: 47c0365e-b1af-429c-b56d-07cfb18b5dc7
+        level: CAN_EDIT  
     variables:
       catalog: ncqai
       schema: synthea_data_gen
