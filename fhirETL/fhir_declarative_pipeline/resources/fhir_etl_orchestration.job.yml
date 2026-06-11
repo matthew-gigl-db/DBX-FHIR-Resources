@@ -28,6 +28,17 @@ resources:
         "true" to trigger a full refresh of both pipelines in order. Defaults
         to incremental refresh, processing only new files via Auto Loader.
 
+      # Trigger when new FHIR bundle files arrive in the landing volume.
+      # The FHIR Bundle Mover job writes to this volume; this job picks up
+      # from there. min_time_between_triggers prevents rapid re-triggering
+      # during bulk loads; wait_after_last_change lets the mover finish
+      # writing before ingestion begins.
+      trigger:
+        file_arrival:
+          url: /Volumes/${var.catalog}/${var.schema_resolved}/${var.landing_volume}/
+          min_time_between_triggers_seconds: 600
+          wait_after_last_change_seconds: 60
+
       email_notifications:
         on_failure:
           - ${var.tags_developer}
