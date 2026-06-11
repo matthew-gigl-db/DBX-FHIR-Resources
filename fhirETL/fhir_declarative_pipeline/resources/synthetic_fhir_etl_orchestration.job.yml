@@ -1,0 +1,89 @@
+# Synthetic FHIR ETL Orchestration job.
+#
+# End-to-end pipeline for synthetic FHIR data generation and ingestion.
+# Intended to be the single entry point when using synthea_on_dbx to generate
+# synthetic patient data and ingest it through the full FHIR pipeline stack.
+#
+# Task graph (linear, 3 tasks):
+#
+#   run_synthea  -->  run_fhir_bundle_mover  -->  run_fhir_etl_orchestration
+#
+# Task descriptions:
+#   run_synthea              - Triggers synthea_on_dbx_job with catalog_use set
+#                              to the target catalog and data movement disabled
+#                              (move_csv_to_landing=false). The job is identified
+#                              by the synthea_job_id bundle variable, which must
+#                              be set per target in databricks.yml.
+#   run_fhir_bundle_mover    - Runs the FHIR Bundle Mover job incrementally,
+#                              picking up the bundles written to the source volume
+#                              by synthea and landing them in the pipeline volume.
+#   run_fhir_etl_orchestration - Runs the FHIR ETL Orchestration job (ingestion
+#                              ETL + silver ETL) incrementally against the newly
+#                              landed bundles.
+#
+# Always runs incrementally. For a full refresh, run the individual jobs directly.
+# The synthea_job_id variable must be populated per target before deploying.
+
+resources:
+  jobs:
+    synthetic_fhir_etl_orchestration_job:
+      name: Synthetic FHIR ETL Orchestration
+      description: >
+        End-to-end pipeline for synthetic FHIR data generation and ingestion.
+        Runs synthea_on_dbx_job to generate synthetic bundles, then the FHIR
+        Bundle Mover to land them, then the FHIR ETL Orchestration job to
+        ingest and process them through bronze and silver layers. Always runs
+        incrementally. Set synthea_job_id in databricks.yml per target before
+        deploying.
+
+      email_notifications:
+        on_failure:
+          - ${var.tags_developer}
+
+      run_as:
+        user_name: ${var.run_as_user}
+      
+      permissions:
+        - user_name: matthew.giglia@databricks.com
+          level: CAN_MANAGE
+
+      tags:
+        project: ${var.tags_project}
+        businessUnit: ${var.tags_businessUnit}
+        requestedBy: ${var.tags_requestedBy}
+        developer: ${var.tags_developer}
+        RemoveAfter: ${var.tags_RemoveAfter}
+        env: ${bundle.target}
+
+      tasks:
+        # Task 1: Generate synthetic FHIR bundles via synthea_on_dbx_job.
+        # catalog_use is set to the target catalog so synthea writes to the
+        # correct location. inject_bad_data and move_csv_to_landing are
+        # hardcoded false - this job is for clean FHIR bundle generation only.
+        - task_key: run_synthea
+          run_job_task:
+            job_id: ${var.synthea_job_id}
+            job_parameters:
+              catalog_use: ${var.catalog}
+              inject_bad_data: "false"
+              move_csv_to_landing: "false"
+
+        # Task 2: Move newly generated bundles from the source volume to the
+        # pipeline landing volume. Runs incrementally so only new files are moved.
+        - task_key: run_fhir_bundle_mover
+          depends_on:
+            - task_key: run_synthea
+          run_job_task:
+            job_id: ${resources.jobs.fhir_bundle_mover_job.id}
+            job_parameters:
+              full_refresh: "false"
+
+        # Task 3: Ingest and process the landed bundles through bronze and
+        # silver layers via the FHIR ETL Orchestration job.
+        - task_key: run_fhir_etl_orchestration
+          depends_on:
+            - task_key: run_fhir_bundle_mover
+          run_job_task:
+            job_id: ${resources.jobs.fhir_etl_orchestration_job.id}
+            job_parameters:
+              full_refresh: "false"

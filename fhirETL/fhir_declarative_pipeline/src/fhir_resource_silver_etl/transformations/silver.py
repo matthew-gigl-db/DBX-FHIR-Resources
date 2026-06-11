@@ -208,7 +208,6 @@ def _create_resource_tables(resource_type: str, columns: list[dict]) -> None:
     # --- Private raw table: append-only PIVOT with VARIANT columns ----------
     @dp.table(
         name=f"{rt_lower}_raw",
-        private=True,
         comment=(
             f"Private intermediate FHIR {resource_type} records. "
             f"PIVOT of fhir_resources with all columns as VARIANT."
@@ -219,6 +218,15 @@ def _create_resource_tables(resource_type: str, columns: list[dict]) -> None:
             "delta.enableRowTracking":             "true",
             "delta.autoOptimize.optimizeWrite":    "true",
             "delta.autoOptimize.autoCompact":      "true",
+            # autoCompact and Predictive Optimization both issue OPTIMIZE transactions
+            # on this table (file rewrites). These are tolerated by _typed_view, which
+            # reads this table via spark.readStream.option("skipChangeCommits", "true").
+            # skipChangeCommits silently skips compaction commits without re-emitting
+            # rows or causing duplicates -- unlike ignoreChanges which re-reads rewritten
+            # files and requires downstream deduplication.
+            # Note: SQL STREAM() syntax does not support streaming options, which is why
+            # private=True is omitted here -- _typed_view must use the Python readStream
+            # API (which requires a catalog-published table).
             "delta.enableVariantShredding":        "true",
             "pipelines.channel":                   "PREVIEW",
             "delta.feature.variantType-preview":   "supported",

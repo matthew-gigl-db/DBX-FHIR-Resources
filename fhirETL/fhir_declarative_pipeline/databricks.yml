@@ -29,6 +29,16 @@ variables:
   serverless_environment_version:
     default: "5"
     description: The serverless environment version to use for notebooks in the Lakeflow Workflow
+  synthea_job_id:
+    description: >
+      ID of the synthea_on_dbx_job deployed in the same workspace. Resolved
+      automatically by job display name at bundle validate and deploy time.
+      Requires a job named exactly "synthea_on_dbx_job" to exist in the target
+      workspace. Deploy the synthea_on_dbx bundle first if this job is missing.
+      See README.md for instructions. An error is raised at validate time if
+      the job is not found or if multiple jobs share the name.
+    lookup:
+      job: "synthea_on_dbx_job"
   tags_project:
     default: FHIR Declarative Pipeline
     description: Project tag to use for deployed resources.

@@ -6,11 +6,7 @@ resources:
     fhir_bundle_mover_job:
       name: FHIR Bundle Mover
       description: >
-        Moves FHIR bundle files from a source volume to a destination landing volume
-        using the fhir_bundle_mover declarative pipeline. Automatically triggered when
-        new files arrive in the source volume. Defaults to incremental refresh, processing
-        only new files via Auto Loader. Set the full_refresh job parameter to "true" to
-        reprocess all source files and overwrite the file_tracker streaming table.
+        Moves FHIR bundle files from a source volume to a destination landing volume using the fhir_bundle_mover declarative pipeline. Automatically triggered when new files arrive in the source volume. Defaults to incremental refresh, processing only new files via Auto Loader. Set the full_refresh job parameter to "true" to reprocess all source files and overwrite the file_tracker streaming table.
 
       # Trigger on new FHIR bundle files arriving in the source volume
       trigger:
@@ -19,6 +15,7 @@ resources:
           min_time_between_triggers_seconds: 600
           wait_after_last_change_seconds: 60
 
+        pause_status: PAUSED
       email_notifications:
         on_failure:
           - ${var.tags_developer}
