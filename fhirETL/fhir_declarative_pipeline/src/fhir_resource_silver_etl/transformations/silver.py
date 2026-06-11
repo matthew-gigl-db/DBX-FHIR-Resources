@@ -42,6 +42,24 @@ from pyspark.sql.functions import col
 
 
 # ---------------------------------------------------------------------------
+# Columns excluded from the PIVOT per resource type.
+#
+# Very large VARIANT values (e.g., ExplanationOfBenefit.item at ~6 KB/row ×
+# 14.6M rows = ~90 GB total, ExplanationOfBenefit.contained at ~552 bytes/row
+# × 14.6M rows = ~8 GB) cause the PIVOT shuffle to OOM on serverless compute
+# and hang indefinitely.
+#
+# Excluded columns are omitted from the silver table. Raw values remain
+# queryable via:
+#   SELECT value FROM {catalog}.{schema}.fhir_resources
+#   WHERE resourceType = '<Type>' AND key = '<column>'
+# ---------------------------------------------------------------------------
+_PIVOT_SKIP_COLUMNS: dict[str, set[str]] = {
+    "ExplanationOfBenefit": {"item", "contained"},
+}
+
+
+# ---------------------------------------------------------------------------
 # Discover resource types and their schemas from the ingestion pipeline
 # ---------------------------------------------------------------------------
 try:
@@ -157,8 +175,32 @@ def _build_schema_ddl(columns: list[dict], resource_type: str) -> str:
 def _create_resource_tables(resource_type: str, columns: list[dict]) -> None:
     """Create a private raw, typed view, and CDC target table for a FHIR resource type."""
     rt_lower = resource_type.lower()
+
+    # Exclude known oversized columns from the PIVOT to prevent OOM shuffles.
+    # Skipped columns are omitted from the silver table; raw values remain in fhir_resources.
+    skip = _PIVOT_SKIP_COLUMNS.get(resource_type, set())
+    if skip:
+        skipped = [c["column_name"] for c in columns if c["column_name"] in skip]
+        columns = [c for c in columns if c["column_name"] not in skip]
+        print(
+            f"[{resource_type}] Skipping oversized PIVOT columns (excluded from silver): "
+            f"{skipped}"
+        )
+
     keys = [c["column_name"] for c in columns]
     keys_sql = ", ".join([f"'{k}'" for k in keys])
+
+    # Build a key predicate to exclude oversized columns from the shuffle input.
+    # The PIVOT reads all rows matching resourceType regardless of whether a key
+    # appears in keys_sql. For ExplanationOfBenefit, 'item' averages ~6 KB/row
+    # across 14.6M rows (~90 GB) and 'contained' adds ~8 GB more. Without this
+    # filter those rows enter the shuffle even though they produce no output column,
+    # causing serverless OOM. Filtering them before the GROUP BY reduces the EOB
+    # shuffle from ~200 GB to ~25 GB.
+    skip_filter = ""
+    if skip:
+        skipped_keys_sql = ", ".join([f"'{k}'" for k in sorted(skip)])
+        skip_filter = f"\n                AND key NOT IN ({skipped_keys_sql})"
 
     # Log schema evolution if applicable
     _detect_schema_evolution(resource_type, columns)
@@ -172,9 +214,15 @@ def _create_resource_tables(resource_type: str, columns: list[dict]) -> None:
             f"PIVOT of fhir_resources with all columns as VARIANT."
         ),
         table_properties={
-            "pipelines.channel": "PREVIEW",
-            "delta.feature.variantType-preview": "supported",
-            "pipelines.reset.allowed": "true",
+            "delta.enableChangeDataFeed":          "true",
+            "delta.enableDeletionVectors":         "true",
+            "delta.enableRowTracking":             "true",
+            "delta.autoOptimize.optimizeWrite":    "true",
+            "delta.autoOptimize.autoCompact":      "true",
+            "delta.enableVariantShredding":        "true",
+            "pipelines.channel":                   "PREVIEW",
+            "delta.feature.variantType-preview":   "supported",
+            "pipelines.reset.allowed":             "true",
             "quality": "bronze",
         },
     )
@@ -188,7 +236,7 @@ def _create_resource_tables(resource_type: str, columns: list[dict]) -> None:
                     key,
                     value
                 FROM STREAM({_catalog}.{_schema}.fhir_resources)
-                WHERE resourceType = '{resource_type}'
+                WHERE resourceType = '{resource_type}'{skip_filter}
             ) PIVOT (
                 first(value) FOR key IN ({keys_sql})
             )
@@ -219,12 +267,15 @@ def _create_resource_tables(resource_type: str, columns: list[dict]) -> None:
         schema=f"\n        {schema_ddl}\n        ",
         cluster_by_auto=True,
         table_properties={
-            "delta.enableChangeDataFeed": "true",
-            "delta.enableDeletionVectors": "true",
-            "delta.enableRowTracking": "true",
-            "pipelines.channel": "PREVIEW",
-            "delta.feature.variantType-preview": "supported",
-            "pipelines.reset.allowed": "true",
+            "delta.enableChangeDataFeed":          "true",
+            "delta.enableDeletionVectors":         "true",
+            "delta.enableRowTracking":             "true",
+            "delta.autoOptimize.optimizeWrite":    "true",
+            "delta.autoOptimize.autoCompact":      "true",
+            "delta.enableVariantShredding":        "true",
+            "pipelines.channel":                   "PREVIEW",
+            "delta.feature.variantType-preview":   "supported",
+            "pipelines.reset.allowed":             "true",
             "quality": "silver",
         },
     )

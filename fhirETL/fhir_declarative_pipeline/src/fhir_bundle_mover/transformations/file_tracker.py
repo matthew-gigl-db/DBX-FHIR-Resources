@@ -45,10 +45,14 @@ def move_file_udf(file_path: str, content: bytes, dest_base: str) -> dict:
     """,
     cluster_by_auto=True,
     table_properties={
-        "delta.enableChangeDataFeed": "true",
-        "delta.autoOptimize.optimizeWrite": "true",
-        "delta.autoOptimize.autoCompact": "true",
-        "pipelines.reset.allowed": "true",
+        "delta.enableChangeDataFeed":          "true",
+        "delta.enableDeletionVectors":         "true",
+        "delta.enableRowTracking":             "true",
+        "delta.autoOptimize.optimizeWrite":    "true",
+        "delta.autoOptimize.autoCompact":      "true",
+        "delta.enableVariantShredding":        "true",
+        "pipelines.channel":                   "PREVIEW",
+        "pipelines.reset.allowed":             "true",
     },
 )
 def file_tracker():

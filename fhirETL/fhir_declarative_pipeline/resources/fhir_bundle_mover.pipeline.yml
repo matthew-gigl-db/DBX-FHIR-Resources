@@ -18,7 +18,7 @@ resources:
       catalog: ${var.catalog}
       schema: ${var.schema_resolved}
       serverless: true
-      channel: "CURRENT"
+      channel: "PREVIEW"
       continuous: false
       edition: "ADVANCED"
       root_path: "../src/fhir_bundle_mover"
