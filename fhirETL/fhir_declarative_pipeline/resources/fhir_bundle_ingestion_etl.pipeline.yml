@@ -36,7 +36,7 @@ resources:
       event_log:
         catalog: ${var.catalog}
         schema: ${var.schema_resolved}
-        name: fhir_declarative_pipeline_etl_event_log
+        name: fhir_bundle_ingestion_etl_event_log
 
       notifications:
         - email_recipients:
