@@ -1,34 +1,33 @@
-"""Dynamic silver table generation for FHIR resource types.
+"""Dynamic silver table generation for FHIR resource types — Fully Streaming.
 
-Architecture (three-step pattern per resource type):
+Architecture (two-step pattern per resource type):
 
-    fhir_resources
-        -> {resource_type}_raw        (Live table: PIVOT + CAST combined, typed columns,
-                                       CDF enabled. SDP/Enzyme handles incremental refresh.)
-        -> {resource_type}_cdc_source (Temporary view: CDF stream from _raw filtered to
-                                       insert + update_postimage events only)
-        -> {resource_type}            (Target streaming table: Auto CDC Type 1 upserts)
+    fhir_resources_variant
+        -> {resource_type}_extract  (Temporary view: streaming filter by resourceType +
+                                     VARIANT path extraction + CAST to typed columns)
+        -> {resource_type}          (Target streaming table: Auto CDC Type 1 upserts)
 
-The _raw live table is backed by a batch PIVOT + CAST query over fhir_resources. SDP
-treats it as a live table (not streaming) because the source is a batch read (no
-STREAM()). Enzyme handles incremental processing where possible. CDF is enabled on _raw
-so the downstream Auto CDC flow reads only row-level change events -- CDF is always
-append-only regardless of how the underlying table was written (OPTIMIZE, MERGE, batch
-overwrite, streaming Complete mode), which eliminates the
-DELTA_SOURCE_TABLE_IGNORE_CHANGES error seen with direct streaming reads.
+This pipeline is FULLY STREAMING end-to-end:
+- Source: fhir_resources_variant streaming table (one row per resource, full VARIANT)
+- Filter: WHERE resourceType = '{type}' (streaming filter, no aggregation)
+- Extract: resource:fieldName path expressions + CAST (local per-row, no shuffle)
+- Target: Auto CDC Type 1 keyed on {resource_type}_uuid
 
-The _cdc_source temporary view reads _raw via Change Data Feed, filtering to insert and
-update_postimage events. _commit_timestamp from CDF drives Auto CDC sequencing.
+NO materialized views. NO PIVOT. NO CDF bridging.
 
-The final silver table is a target streaming table that receives SCD Type 1
-(upsert/overwrite) changes via create_auto_cdc_flow. This means:
-  - New resources are inserted.
-  - Updated resources overwrite existing rows (matched by {resource_type}_uuid).
-  - Ordering is determined by _commit_timestamp from the CDF stream.
+The previous architecture required a PIVOT aggregation (first()) which forced
+Complete output mode, breaking downstream streaming reads. This approach eliminates
+the PIVOT entirely by reading from a pre-assembled per-resource VARIANT table and
+extracting columns via VARIANT path expressions.
 
-Schema evolution is handled automatically: when new columns or changed struct
-types appear in fhir_resource_schemas, the table definitions change and DLT
-triggers a full refresh (pipelines.reset.allowed = true).
+Benefits over previous PIVOT-based approach:
+- Fully streaming (no batch/MV intermediary)
+- No OOM risk from PIVOT shuffles (extraction is per-row, no shuffle)
+- All columns includable (even large ones like EOB.item, EOB.contained)
+- Simpler architecture (2 objects per type instead of 3)
+- Directly compatible with FHIR server loading (resource VARIANT -> NDJSON/JSONB)
+- Eliminates DELTA_SOURCE_TABLE_IGNORE_CHANGES errors entirely
+- No dependency on Enzyme incrementalization behavior
 
 Why SQL CAST instead of a UDF:
   Spark UDFs have fixed return types, so a single UDF cannot dynamically cast
@@ -36,11 +35,19 @@ Why SQL CAST instead of a UDF:
   handles VARIANT-to-typed conversions including nested ARRAY<STRUCT<...>> types.
 
 Two-pass behavior:
-  - First run of ingestion pipeline: Bronze and resource tables are populated.
+  - First run of ingestion pipeline: Bronze, fhir_resources_variant, and schema
+    tables are populated.
   - First run of this silver pipeline: Silver tables are dynamically generated
     for each discovered resource type (e.g., Patient, Encounter, Condition).
   - Schema changes: If fhir_resource_schemas has new columns or changed types,
-    the table definitions change and DLT triggers a full refresh automatically.
+    the table definitions change and SDP triggers a full refresh automatically.
+
+FHIR server loading (Lakebase/HAPI):
+  The source table fhir_resources_variant stores each resource as a complete
+  VARIANT document. This is the ideal staging format for:
+  - NDJSON export for HAPI $import or Aidbox /fhir/$import
+  - Direct VARIANT->JSONB casting for Aidbox on Databricks Lakebase
+  - No information loss (all fields preserved, including large nested arrays)
 """
 
 from pyspark import pipelines as dp
@@ -48,21 +55,18 @@ from pyspark.sql.functions import col
 
 
 # ---------------------------------------------------------------------------
-# Columns excluded from the PIVOT per resource type.
+# Columns excluded from extraction per resource type (optional).
 #
-# Very large VARIANT values (e.g., ExplanationOfBenefit.item at ~6 KB/row ×
-# 14.6M rows = ~90 GB total, ExplanationOfBenefit.contained at ~552 bytes/row
-# × 14.6M rows = ~8 GB) cause the PIVOT shuffle to OOM on serverless compute
-# and hang indefinitely.
+# Unlike the previous PIVOT approach, VARIANT path extraction does NOT require
+# a shuffle, so large columns (e.g., EOB.item at ~6 KB/row x 14.6M rows) do
+# NOT cause OOM. This dict is retained only for intentional exclusions where
+# columns should remain queryable only via the VARIANT source and not
+# materialized in the typed silver table.
 #
-# Excluded columns are omitted from the silver table. Raw values remain
-# queryable via:
-#   SELECT value FROM {catalog}.{schema}.fhir_resources
-#   WHERE resourceType = '<Type>' AND key = '<column>'
+# To exclude columns, uncomment and populate:
+#   "ExplanationOfBenefit": {"item", "contained"},
 # ---------------------------------------------------------------------------
-_PIVOT_SKIP_COLUMNS: dict[str, set[str]] = {
-    "ExplanationOfBenefit": {"item", "contained"},
-}
+_EXTRACT_SKIP_COLUMNS: dict[str, set[str]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +108,7 @@ except Exception:
 def _detect_schema_evolution(resource_type: str, columns: list[dict]) -> bool:
     """Check if the silver table schema has changed, requiring a full refresh.
 
-    Returns True if new columns or changed types are detected. DLT handles the
+    Returns True if new columns or changed types are detected. SDP handles the
     actual full refresh via pipelines.reset.allowed = true.
     """
     rt_lower = resource_type.lower()
@@ -127,7 +131,7 @@ def _detect_schema_evolution(resource_type: str, columns: list[dict]) -> bool:
             print(
                 f"[Schema Evolution] {resource_type}: "
                 f"new columns detected: {new_cols}. "
-                f"Full refresh will be triggered by DLT."
+                f"Full refresh will be triggered by SDP."
             )
             return True
     except Exception:
@@ -138,13 +142,23 @@ def _detect_schema_evolution(resource_type: str, columns: list[dict]) -> bool:
 # ---------------------------------------------------------------------------
 # SQL generation helpers
 # ---------------------------------------------------------------------------
-def _build_cast_sql(columns: list[dict], rt_lower: str) -> str:
-    """Build SELECT expressions that CAST each VARIANT column to its inferred type."""
-    exprs = [f"`{rt_lower}_uuid`", "`bundle_uuid`", f"`{rt_lower}_url`"]
-    for col in columns:
-        name = col["column_name"]
-        dtype = col["schema_as_struct"]
-        exprs.append(f"CAST(`{name}` AS {dtype}) AS `{name}`")
+def _build_extract_exprs(columns: list[dict], rt_lower: str) -> str:
+    """Build SELECT expressions that extract and CAST VARIANT paths to typed columns.
+
+    Each column is extracted from the resource VARIANT via path expression
+    (resource:fieldName) and cast to its inferred struct type. This is a
+    per-row operation with no shuffle — fundamentally different from PIVOT.
+    """
+    exprs = [
+        f"resource_uuid AS `{rt_lower}_uuid`",
+        "`bundle_uuid`",
+        f"fullUrl AS `{rt_lower}_url`",
+        "`ingest_time`",
+    ]
+    for c in columns:
+        name = c["column_name"]
+        dtype = c["schema_as_struct"]
+        exprs.append(f"CAST(resource:{name} AS {dtype}) AS `{name}`")
     return ",\n                ".join(exprs)
 
 
@@ -165,9 +179,9 @@ def _build_schema_ddl(columns: list[dict], resource_type: str) -> str:
             f"COMMENT 'Full URL of the {resource_type} resource in the entry array.'"
         ),
     ]
-    for col in columns:
-        name = col["column_name"]
-        dtype = col["schema_as_struct"]
+    for c in columns:
+        name = c["column_name"]
+        dtype = c["schema_as_struct"]
         parts.append(
             f"`{name}` {dtype} "
             f"COMMENT 'FHIR {resource_type}.{name} element.'"
@@ -176,116 +190,55 @@ def _build_schema_ddl(columns: list[dict], resource_type: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Dynamic table generation
+# Dynamic table generation — fully streaming, no materialized views
 # ---------------------------------------------------------------------------
 def _create_resource_tables(resource_type: str, columns: list[dict]) -> None:
-    """Create a private raw, typed view, and CDC target table for a FHIR resource type."""
+    """Create a streaming extract view and CDC target table for a FHIR resource type.
+
+    Pattern per resource type (2 objects, fully streaming):
+      1. {type}_extract  - Temporary view: STREAM(fhir_resources_variant) filtered
+                           by resourceType, VARIANT path extraction + CAST.
+      2. {type}          - Streaming table: Auto CDC Type 1 upserts from _extract.
+    """
     rt_lower = resource_type.lower()
 
-    # Exclude known oversized columns from the PIVOT to prevent OOM shuffles.
-    # Skipped columns are omitted from the silver table; raw values remain in fhir_resources.
-    skip = _PIVOT_SKIP_COLUMNS.get(resource_type, set())
+    # Apply optional column exclusions
+    skip = _EXTRACT_SKIP_COLUMNS.get(resource_type, set())
     if skip:
         skipped = [c["column_name"] for c in columns if c["column_name"] in skip]
         columns = [c for c in columns if c["column_name"] not in skip]
         print(
-            f"[{resource_type}] Skipping oversized PIVOT columns (excluded from silver): "
+            f"[{resource_type}] Skipping columns (excluded from silver): "
             f"{skipped}"
         )
-
-    keys = [c["column_name"] for c in columns]
-    keys_sql = ", ".join([f"'{k}'" for k in keys])
-
-    # Build a key predicate to exclude oversized columns from the shuffle input.
-    # The PIVOT reads all rows matching resourceType regardless of whether a key
-    # appears in keys_sql. For ExplanationOfBenefit, 'item' averages ~6 KB/row
-    # across 14.6M rows (~90 GB) and 'contained' adds ~8 GB more. Without this
-    # filter those rows enter the shuffle even though they produce no output column,
-    # causing serverless OOM. Filtering them before the GROUP BY reduces the EOB
-    # shuffle from ~200 GB to ~25 GB.
-    skip_filter = ""
-    if skip:
-        skipped_keys_sql = ", ".join([f"'{k}'" for k in sorted(skip)])
-        skip_filter = f"\n                AND key NOT IN ({skipped_keys_sql})"
 
     # Log schema evolution if applicable
     _detect_schema_evolution(resource_type, columns)
 
-    # --- Live table: PIVOT + CAST with typed columns, Enzyme-managed ----------
-    # SDP treats this as a live table (not streaming) because the source is a
-    # batch read of fhir_resources (no STREAM()). Enzyme handles incremental
-    # processing -- only new fhir_resources rows are processed per update where
-    # possible. PIVOT and CAST are combined in one query, eliminating the
-    # separate _typed_view step.
-    #
-    # CDF is enabled so _cdc_source reads only row-level change events from this
-    # table. CDF is always append-only regardless of how the underlying table is
-    # written (OPTIMIZE, MERGE, batch overwrite), which eliminates the
-    # DELTA_SOURCE_TABLE_IGNORE_CHANGES error seen with direct streaming reads.
-    cast_sql = _build_cast_sql(columns, rt_lower)
-    @dp.table(
-        name=f"{rt_lower}_raw",
-        comment=(
-            f"Live table: typed PIVOT of fhir_resources for {resource_type}. "
-            f"PIVOT + CAST combined; source for Auto CDC via Change Data Feed."
-        ),
-        table_properties={
-            "delta.enableChangeDataFeed":          "true",
-            "delta.enableDeletionVectors":         "true",
-            "delta.enableRowTracking":             "true",
-            "delta.autoOptimize.optimizeWrite":    "true",
-            "delta.autoOptimize.autoCompact":      "true",
-            # autoCompact and PO run OPTIMIZE on this table. This is safe because
-            # _cdc_source reads via CDF, which is append-only and unaffected by
-            # OPTIMIZE (OPTIMIZE does not produce CDF change events).
-            "delta.enableVariantShredding":        "true",
-            "pipelines.channel":                   "PREVIEW",
-            "delta.feature.variantType-preview":   "supported",
-            "pipelines.reset.allowed":             "true",
-            "quality": "silver",
-        },
-    )
-    def _raw():
+    # --- Streaming extract view: filter + VARIANT path extraction + CAST ------
+    # Reads fhir_resources_variant as a stream, filters to the target
+    # resourceType, and extracts typed columns from the resource VARIANT via
+    # path expressions (resource:fieldName). No aggregation, no shuffle —
+    # pure append-mode streaming.
+    extract_sql = _build_extract_exprs(columns, rt_lower)
+
+    @dp.temporary_view(name=f"{rt_lower}_extract")
+    def _extract():
         return spark.sql(f"""
             SELECT
-                {cast_sql}
-            FROM (
-                SELECT
-                    resource_uuid AS {rt_lower}_uuid,
-                    bundle_uuid,
-                    fullUrl AS {rt_lower}_url,
-                    key,
-                    value
-                FROM {_catalog}.{_schema}.fhir_resources
-                WHERE resourceType = '{resource_type}'{skip_filter}
-            ) PIVOT (
-                first(value) FOR key IN ({keys_sql})
-            )
+                {extract_sql}
+            FROM STREAM({_catalog}.{_schema}.fhir_resources_variant)
+            WHERE resourceType = '{resource_type}'
         """)
 
-    # --- CDF source view: reads _raw via Change Data Feed -------------------
-    # CDF records are always append-only new rows regardless of how the source
-    # table was written. Filtering to insert + update_postimage excludes pre-image
-    # rows that would otherwise produce spurious upserts in the Auto CDC target.
-    # _commit_timestamp is used as the Auto CDC sequence column.
-    @dp.temporary_view(name=f"{rt_lower}_cdc_source")
-    def _cdc_source():
-        return (
-            spark.readStream
-            .format("delta")
-            .option("readChangeFeed", "true")
-            .table(f"{_catalog}.{_schema}.{rt_lower}_raw")
-            .filter(col("_change_type").isin("insert", "update_postimage"))
-        )
-
-    # --- Target silver table: Auto CDC Type 1 upserts ----------------------
+    # --- Target silver table: Auto CDC Type 1 upserts -------------------------
     schema_ddl = _build_schema_ddl(columns, resource_type)
 
     dp.create_streaming_table(
         name=rt_lower,
         comment=(
-            f"Typed FHIR {resource_type} records with columns cast "
-            f"from VARIANT to their inferred schemas. "
+            f"Typed FHIR {resource_type} records with columns extracted "
+            f"from VARIANT via path expressions and cast to inferred schemas. "
             f"Auto CDC Type 1 upserts keyed on {rt_lower}_uuid."
         ),
         schema=f"\n        {schema_ddl}\n        ",
@@ -306,10 +259,10 @@ def _create_resource_tables(resource_type: str, columns: list[dict]) -> None:
 
     dp.create_auto_cdc_flow(
         target=rt_lower,
-        source=f"{rt_lower}_cdc_source",
+        source=f"{rt_lower}_extract",
         keys=[f"{rt_lower}_uuid"],
-        sequence_by=col("_commit_timestamp"),
-        except_column_list=["_change_type", "_commit_version", "_commit_timestamp"],
+        sequence_by=col("ingest_time"),
+        except_column_list=["ingest_time"],
         stored_as_scd_type=1,
     )
 
