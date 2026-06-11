@@ -1,0 +1,66 @@
+# Job to execute the fhir_bundle_mover pipeline.
+# Triggered by file arrival in the source volume, or manually with full_refresh override.
+
+resources:
+  jobs:
+    fhir_bundle_mover_job:
+      name: FHIR Bundle Mover
+      description: >
+        Moves FHIR bundle files from a source volume to a destination landing volume using the fhir_bundle_mover declarative pipeline. Automatically triggered when new files arrive in the source volume. Defaults to incremental refresh, processing only new files via Auto Loader. Set the full_refresh job parameter to "true" to reprocess all source files and overwrite the file_tracker streaming table.
+
+      # Trigger on new FHIR bundle files arriving in the source volume
+      trigger:
+        file_arrival:
+          url: /Volumes/${var.source_catalog}/synthea_data_gen/synthetic_files_raw/output/fhir/
+          min_time_between_triggers_seconds: 600
+          wait_after_last_change_seconds: 60
+
+        pause_status: PAUSED
+      email_notifications:
+        on_failure:
+          - ${var.tags_developer}
+
+      # run_as:
+      #   user_name: ${var.run_as_user}
+
+      parameters:
+        - name: full_refresh
+          default: "false"
+
+      tags:
+        project: ${var.tags_project}
+        businessUnit: ${var.tags_businessUnit}
+        requestedBy: ${var.tags_requestedBy}
+        developer: ${var.tags_developer}
+        RemoveAfter: ${var.tags_RemoveAfter}
+        env: ${bundle.target}
+
+      permissions:
+        - user_name: matthew.giglia@databricks.com
+          level: CAN_MANAGE
+
+      tasks:
+        # Task 1: Evaluate the full_refresh job parameter
+        - task_key: check_full_refresh
+          condition_task:
+            op: EQUAL_TO
+            left: "{{job.parameters.full_refresh}}"
+            right: "true"
+
+        # Task 2: Incremental refresh — runs when full_refresh != "true"
+        - task_key: incremental_refresh
+          depends_on:
+            - task_key: check_full_refresh
+              outcome: "false"
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.fhir_bundle_mover_etl.id}
+            full_refresh: false
+
+        # Task 3: Full refresh — runs when full_refresh == "true"
+        - task_key: full_refresh_pipeline
+          depends_on:
+            - task_key: check_full_refresh
+              outcome: "true"
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.fhir_bundle_mover_etl.id}
+            full_refresh: true
