@@ -2,6 +2,64 @@ from pyspark import pipelines as dp
 
 
 @dp.table(
+    comment=(
+        "One row per FHIR resource with the full resource preserved as VARIANT. "
+        "Universal staging layer for: (1) fully-streaming silver analytics tables "
+        "(VARIANT path extraction, no PIVOT), (2) FHIR server loading via NDJSON "
+        "export or direct VARIANT->JSONB for Aidbox on Databricks Lakebase, and "
+        "(3) ad-hoc VARIANT path queries against the complete resource document."
+    ),
+    schema="""
+        resource_uuid STRING NOT NULL PRIMARY KEY
+            COMMENT 'Unique identifier for the FHIR resource (SHA-256 of bundle_uuid + fullUrl).',
+        bundle_uuid STRING NOT NULL
+            COMMENT 'Unique identifier for the FHIR bundle containing this resource.',
+        fullUrl STRING NOT NULL
+            COMMENT 'The full URL of the resource in the bundle entry array.',
+        resourceType STRING NOT NULL
+            COMMENT 'The FHIR resource type (e.g., Patient, Encounter, Condition).',
+        ingest_time TIMESTAMP NOT NULL
+            COMMENT 'The timestamp the source bundle file was ingested.',
+        resource VARIANT
+            COMMENT 'The complete FHIR resource as a VARIANT document. Queryable via path expressions (resource:fieldName).'
+    """,
+    cluster_by_auto=True,
+    table_properties={
+        "delta.enableChangeDataFeed":          "true",
+        "delta.enableDeletionVectors":         "true",
+        "delta.enableRowTracking":             "true",
+        "delta.autoOptimize.optimizeWrite":    "true",
+        "delta.autoOptimize.autoCompact":      "true",
+        "delta.enableVariantShredding":        "true",
+        "pipelines.channel":                   "PREVIEW",
+        "quality": "bronze",
+    },
+)
+def fhir_resources_variant():
+    """Explode bundle entries into one row per resource, preserving the full resource VARIANT.
+
+    Unlike fhir_resources (which explodes the resource itself into key-value rows
+    for schema discovery), this table keeps each resource as a single VARIANT
+    document. This is the ideal format for:
+    - Streaming silver tables (filter by resourceType + VARIANT path extraction)
+    - FHIR server bulk loading (NDJSON export or JSONB insert)
+    - Ad-hoc queries via resource:fieldName path syntax
+    """
+    return spark.sql("""
+        SELECT
+            sha2(concat(bundle_uuid, entry.value:fullUrl::string), 256) AS resource_uuid,
+            bundle_uuid,
+            CAST(entry.value:fullUrl AS STRING) AS fullUrl,
+            CAST(entry.value:resource.resourceType AS STRING) AS resourceType,
+            ingest_time,
+            entry.value:resource AS resource
+        FROM
+            STREAM(fhir_bronze_variant),
+            LATERAL variant_explode(fhir:entry) AS entry
+    """)
+
+
+@dp.table(
     comment="Original FHIR Bundle metadata extracted from parsed FHIR bundles.",
     schema="""
         bundle_uuid STRING NOT NULL PRIMARY KEY
