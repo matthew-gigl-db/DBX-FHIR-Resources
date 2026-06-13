@@ -14,7 +14,7 @@ from pyspark.sql.functions import col, current_timestamp, expr
             file_modification_time: TIMESTAMP
         > NOT NULL COMMENT 'Original metadata of the file ingested from the volume.',
         ingest_time TIMESTAMP NOT NULL COMMENT 'The timestamp the file was ingested.',
-        bundle_uuid STRING NOT NULL COMMENT 'Unique identifier for the FHIR bundle.',
+        bundle_uuid STRING NOT NULL COMMENT 'Stable identifier for the FHIR bundle, derived as sha2(file_path + unix_millis(file_modification_time)). Deterministic across replays of the same file.',
         value STRING COMMENT 'Original JSON record ingested from the volume as a full text string value.'
     """,
     cluster_by_auto=True,
@@ -40,7 +40,7 @@ def fhir_bronze():
         .select(
             col("_metadata").alias("file_metadata"),
             current_timestamp().alias("ingest_time"),
-            expr("uuid()").alias("bundle_uuid"),
+            expr("sha2(concat(_metadata.file_path, cast(unix_millis(_metadata.file_modification_time) as string)), 256)").alias("bundle_uuid"),
             col("value"),
         )
     )
@@ -49,7 +49,7 @@ def fhir_bronze():
 @dp.table(
     comment="Evaluate FHIR JSON records as VARIANT data type for structured querying.",
     schema="""
-        bundle_uuid STRING NOT NULL COMMENT 'Unique identifier for the FHIR bundle.',
+        bundle_uuid STRING NOT NULL COMMENT 'Stable identifier for the FHIR bundle, derived as sha2(file_path + unix_millis(file_modification_time)). Deterministic across replays of the same file.',
         ingest_time TIMESTAMP NOT NULL COMMENT 'The timestamp the file was ingested.',
         file_metadata STRUCT<
             file_path: STRING,

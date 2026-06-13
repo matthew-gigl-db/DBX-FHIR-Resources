@@ -2,7 +2,7 @@
 
 Architecture (two-step pattern per resource type):
 
-    fhir_resources_variant
+    fhir_resources
         -> {resource_type}_extract  (Temporary view: streaming filter + reference
                                      extraction + full resource VARIANT preservation)
         -> {resource_type}          (Target streaming table: Auto CDC Type 1 upserts)
@@ -34,7 +34,7 @@ Design principles:
 - Supports future gold-layer SCD1/SCD2 clinical mart construction
 
 Two-pass behavior:
-  - First run of ingestion pipeline: Bronze, fhir_resources_variant, and schema
+  - First run of ingestion pipeline: Bronze, fhir_resources, and schema
     tables are populated.
   - First run of this silver pipeline: Silver tables are dynamically generated
     for each discovered resource type.
@@ -440,7 +440,7 @@ def _create_resource_tables(resource_type: str, columns: list[dict]) -> None:
                 {temporal_start_sql} AS clinical_event_effective_start,
                 {temporal_end_sql} AS clinical_event_effective_end,
                 resource
-            FROM STREAM({_catalog}.{_schema}.fhir_resources_variant)
+            FROM STREAM({_catalog}.{_schema}.fhir_resources)
             WHERE resourceType = '{resource_type}'
         """)
 
