@@ -36,6 +36,7 @@ Every session log follows a consistent template:
 | Date | Session | Summary |
 |---|---|---|
 | 2026-06-13 | [gold-yaml-completion-and-overrides](2026-06-13_gold-yaml-completion-and-overrides.md) | Completed all 20 YAML fixtures, created gold_overrides.py for location + bridge, cleaned up entity_resolution.py (741→279 lines), updated PROJECT_MEMORY.md |
+| 2026-06-13 | [clinical-mart-first-run](2026-06-13_clinical-mart-first-run.md) | Implemented clinical mart (10 tables), debugged CDC co-location + stream-stream join, first clean full refresh, integrity verified, no-value observation diagnosis |
 
 ## Usage
 

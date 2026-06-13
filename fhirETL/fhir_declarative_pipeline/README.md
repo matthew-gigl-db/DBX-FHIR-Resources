@@ -91,10 +91,26 @@ Natural key strategies:
 - Events: sha2(patient_nk + code + temporal)
 
 ### 5. FHIR Clinical Mart (`fhir_gold_clinical_mart`)
-Dimensional model consuming from `_gold` tables into a separate schema.
-Planned: `dim_patient`, `dim_provider`, `dim_organization`, `dim_date`,
-`fact_encounter`, `fact_condition`, `fact_observation`, `fact_procedure`,
-`fact_medication`, `fact_claim`. Not yet implemented.
+Dimensional model consuming from `_gold` tables into a separate `clinical_mart` schema.
+**Live as of 2026-06-13.** 10 tables: 4 dimensions + 6 facts.
+
+| Layer | Tables |
+|---|---|
+| Dimensions (4) | `dim_patient`, `dim_practitioner`, `dim_organization`, `dim_location` |
+| Facts (6) | `fact_encounter`, `fact_condition`, `fact_observation`, `fact_procedure`, `fact_medication_request`, `fact_immunization` |
+
+Two transformation files:
+- `entity_resolution.py` — 10 temp views with computed columns (age bands, LOS, chronic/active flags, abnormal range flags)
+- `dimensions.py` — 10 streaming table schemas + co-located Auto CDC flows (SCD1)
+
+Critical SDP rule: `dp.create_auto_cdc_flow()` must be co-located in the **same file** as its `dp.create_streaming_table()`.
+
+Critical streaming rule: dimension lookup CTEs in fact views use `_static()` snapshot reads — stream-stream
+LEFT OUTER joins are not supported without watermarks.
+
+Metric views: `fixtures/metric_views/*.metric_view.yml` (registration via `register_metric_views` notebook).
+
+Pending: `fact_claim`, FK columns for `fact_encounter`, `value_raw` for `fact_observation`, `encounter_natural_key` for `fact_condition`.
 
 ---
 
@@ -125,11 +141,16 @@ fhir_declarative_pipeline/
 │   │       ├── fhir_gold.py                # 3 entity streaming tables + CDC
 │   │       ├── gold_overrides.py           # location + bridge (edge cases)
 │   │       └── gold_engine.py              # YAML-driven: 20 tables
-│   └── fhir_gold_clinical_mart/transformations/
+│   └── fhir_gold_clinical_mart/
+│       ├── transformations/
+│       │   ├── dimensions.py               # 10 streaming tables + co-located CDC flows (SCD1)
+│       │   └── entity_resolution.py        # 10 temp views (age bands, LOS, clinical flags)
+│       └── register_metric_views.ipynb     # Registers metric views from YAML fixtures
 ├── fixtures/
 │   ├── gold_etl/*.gold.yml                 # 20 gold table YAML definitions
 │   ├── metric_views/*.metric_view.yml      # UC Metric View definitions
 │   ├── architecture/                       # Design documents
+│   ├── clinical_mart_integrity_check.py    # Post-load validation notebook (row counts, integrity, DQ)
 │   └── sessions/                           # Development session logs
 └── tests/                                  # (planned)
 ```
